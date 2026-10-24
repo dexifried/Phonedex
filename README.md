@@ -76,17 +76,20 @@ Do not claim success until the relevant checks actually pass.
 
 - SIP over TLS with PCMU audio and SDES-SRTP media; the gateway rejects plain RTP offers.
 - Duplex WebRTC voice sessions connected to GPT Live using the local Codex OAuth cache.
+- Caller barge-in: sustained caller speech clears queued AI audio, sends quiet RTP during interruption, and lets the caller finish. Local echo rejection reduces false triggers.
 - A self-hosted controller that polls the Worker over outbound HTTPS and does not expose a public management listener.
 - Optional Worker control routes for dispatch, status, transcripts, private steering, command acknowledgements, and hangup.
 - Normal and business prompt modes. Business mode can read a local profile and a read-only calendar snapshot. It does not book appointments or send messages.
 - Default-deny outbound recipient allowlisting, per-day call limits, a one-call concurrency limit, and separate operator and gateway bearer secrets.
-- Transcript normalization, duplicate suppression across event sources, and retries for failed transcript uploads.
+- Transcript normalization, duplicate suppression across event sources, and retries for failed Worker transcript uploads.
+- Optional **AgentPhone Calls dashboard transcript sync** for inbound calls, using the caller number and timestamp to match exactly one completed provider record. Disabled unless explicitly configured.
 
 ### Experimental or not verified
 
 - Public inbound SIP listening is opt-in and requires a trusted TLS certificate, explicit carrier source ranges, and a verified SRTP media path.
 - The SIP implementation is not a complete transaction stack or certified SBC. Provider, NAT, TLS, and SDP compatibility outside the limited validation recorded in the [release status](docs/RELEASE_STATUS.md) is unknown.
 - Transcripts are model-generated text, can be delayed by polling and KV consistency, and are not certified verbatim records.
+- Barge-in is an RTP playback cutoff, not a documented GPT Live model-level cancellation; false positives and imperfect response resumption remain possible.
 - A consent-gated lead-storage helper writes to local SQLite, but the live voice delegation path does not call it yet.
 - The subscription endpoint and private steering event can change without notice. Steering does not guarantee that the model will follow an instruction.
 
@@ -168,13 +171,46 @@ npx wrangler secret put VOICE_GATEWAY_TOKEN
 
 Each secret command prompts for a value and deploys a Worker version. Put the `VOICE_GATEWAY_TOKEN` value in local `.env` as `PHONEDEX_GATEWAY_TOKEN`; keep `AGENT_CONTROL_TOKEN` separate and give it only to the remote calling agent. Set `PHONEDEX_GATEWAY_URL` to the deployed Worker URL ending in `/agent/gateway`. The local `worker/wrangler.toml` is ignored by Git.
 
+### Optional AgentPhone call-history transcripts
+
+You can opt in to push **text-only** GPT Live transcripts from completed **inbound**
+calls to your own AgentPhone Calls dashboard. This requires an AgentPhone API
+credential and phone-number ID, both supplied **privately**. No audio recording
+feature or local recording files are included.
+
+In your **private** environment (not in committed source), set:
+
+``dotenv
+PHONEDEX_AGENTPHONE_TRANSCRIPTS_ENABLED=1
+PHONEDEX_AGENTPHONE_API_KEY=your-private-agentphone-api-key
+PHONEDEX_AGENTPHONE_NUMBER_ID=your-own-agentphone-number-id
+``
+
+Launch `sip_tls_gateway.py` with `--backend subscription` and these variables
+available in the process environment. The direct SIP CLI does **not**
+automatically load `.env`; export the variables first or use a private wrapper
+that reads them. The `phonedex.py` CLI loads simple `PHONEDEX_*` keys from `.env`
+for its supported commands, but does not currently launch the SIP listener.
+
+Only normalized GPT Live transcript text is exported. The publisher waits
+briefly for a completed provider call, verifies the configured AgentPhone
+number ID, exact caller E.164 number and a bounded start-time window, then
+uploads at most 100 merged turns. If matching is ambiguous, the transcript is
+too large, or AgentPhone already has a transcript, no write occurs. There is
+no historical backfill, no plaintext disk spool and **no automatic POST retry
+after an uncertain network response**. Provider connectivity failures or
+restarts can lose the optional export.
+
+Transcripts contain personal data; give callers any notice/consent required
+by law and confirm that sending speech to AgentPhone is appropriate.
+
 ### Check configuration and run
 
 From the repository root, install dependencies before running the offline tests:
 
 ```sh
 python phonedex.py doctor
-python -m unittest test_agent_controller test_harness_live_adapter test_sip_teardown test_onboarding
+python -m unittest test_agent_controller test_harness_live_adapter test_sip_teardown test_onboarding test_barge_in test_agentphone_transcripts
 node worker/test-agent.mjs
 ```
 
@@ -203,7 +239,7 @@ This command does not place a call. Adding `--place-call` initiates a real SIP c
 | `doctor` reports missing Python packages | Install `requirements.txt` with the same Python interpreter used to run PhoneDex. |
 | A recipient is blocked | The allowlist is empty by default; add only an explicitly authorized E.164 destination to local `.env`. |
 | An inbound call is rejected | Inspect the negotiated SDP media profile. SIP/TLS alone is not enough; PhoneDex requires SDES-SRTP and will reject plain RTP. |
-| A transcript is delayed or missing | The controller batches transcript events and Cloudflare KV is eventually consistent. Check the gateway URL and the separate gateway secret; transcript text expires after 24 hours. |
+| A transcript is delayed or missing | For the Worker, check gateway connectivity, token and KV consistency. For optional AgentPhone exports, check the three `PHONEDEX_AGENTPHONE_*` environment variables, the inbound caller ID and completed provider record; the exporter refuses ambiguous matches and stores no local plaintext retry spool. |
 | You need current command options | Run `python phonedex.py --help`, `python phonedex.py dial --help`, or `python sip_tls_gateway.py --help`. |
 
 ## Limitations and roadmap
@@ -213,6 +249,7 @@ This command does not place a call. Adding `--place-call` initiates a real SIP c
 - Inbound media requires SRTP even when SIP signaling itself uses TLS. PhoneDex will reject plain RTP rather than silently downgrade audio privacy.
 - Business tools do not book appointments or deliver lead notifications. The consent-gated lead-storage helper is not wired to live calls yet.
 - Human call transfers, warm handoffs, and GPT Live shutdown after transfer remain planned work.
+- Speech interruption uses a local heuristic cutoff; GPT Live's undocumented subscription transport is not guaranteed to cancel its internal generation.
 
 The [roadmap and release review](docs/RELEASE_STATUS.md) records current verification and known risks.
 
@@ -221,7 +258,8 @@ The [roadmap and release review](docs/RELEASE_STATUS.md) records current verific
 - [Guided setup and readiness checks](docs/ONBOARDING.md) — interactive local configuration, remote control options, and remaining manual steps.
 - [Technical notes](docs/TECHNICAL_NOTES.md) — media, control, authentication, and data boundaries.
 - [Release status](docs/RELEASE_STATUS.md) — verified behavior, risks, and review guidance.
-- [Public preview.4 release notes](docs/RELEASE_NOTES_v0.1.0-preview.4.md) — clean-history experimental source preview.
+- [Preview.5 release notes](docs/RELEASE_NOTES_v0.1.0-preview.5.md) — interruption handling, optional AgentPhone transcript export and limitations.
+- [Preview.4 release notes](docs/RELEASE_NOTES_v0.1.0-preview.4.md) — original clean-history source preview.
 - [Security policy](SECURITY.md) — credentials, calling consent, transcripts, and vulnerability reporting.
 - [Human call handoff specification](docs/CALL_HANDOFF_SPEC.md) — planned behavior only; no transfer implementation.
 - [Third-party notices](THIRD_PARTY_NOTICES.md) — Hermes Talk attribution and preserved MIT license.

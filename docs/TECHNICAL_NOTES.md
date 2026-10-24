@@ -23,6 +23,29 @@ The standalone `bridge.py` and SIP gateway CLIs also expose an echo backend for 
 
 The Worker never receives RTP/SRTP audio or SIP account credentials. It does receive transcript text and limited call metadata.
 
+## RTP interruption and optional transcript publishing
+
+- `phonebridge/barge_in.py` detects sustained near-end speech with a bounded
+  energy/zero-crossing heuristic and echo correlation. `bridge.py` invalidates
+  queued playout frames, suppresses obsolete model audio and sends quiet RTP
+  packets while interrupted. The synthetic wake greeting runs concurrently
+  and is cancelled when real caller voice arrives.
+- This is a **local audible cutoff**, not a confirmed subscription API
+  `response.cancel` implementation. The media bridge only resumes when a
+  new model-audio boundary can be inferred; field behavior depends on echo,
+  SIP provider buffering, and GPT Live's own turn handling.
+- `phonebridge/agentphone_transcripts.py` is disabled unless
+  `PHONEDEX_AGENTPHONE_TRANSCRIPTS_ENABLED=1` and both a private API key and
+  number ID are supplied. It gathers normalized GPT Live *text* events
+  for inbound calls and submits them to the configured user's AgentPhone
+  history after a unique provider call match is confirmed.
+- Exact caller ID, provider phone-number ID and call-start time are required.
+  Zero or multiple provider matches are rejected. Existing provider transcripts
+  aren't overwritten. There is no on-disk queue, recorder or audio capture.
+- **This public adapter is independent of any private deployment-specific
+  recording or credential management.** Its simple in-memory export cannot
+  guarantee delivery across restarts or transient API failures.
+
 ## Local business data
 
 Business mode can read `harness/business_profile.json` (or the path in `PHONEDEX_BUSINESS_PROFILE`) and a local read-only calendar free/busy snapshot. `harness/tools.py` also contains a consent-gated lead-storage helper that writes to local SQLite under `PHONEDEX_DATA_DIR` (default `~/.phonedex/leads.sqlite3`) and sends no message. That helper is not called by the current live transcript-delegation path; do not describe live lead capture as an available call feature.

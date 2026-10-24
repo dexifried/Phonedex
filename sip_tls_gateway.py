@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import base64
+from datetime import datetime, timezone
 import ipaddress
 import logging
 import os
@@ -32,6 +33,9 @@ if str(VENDOR) not in sys.path:sys.path.insert(0,str(VENDOR))
 from pylibsrtp import Policy, Session, Error as SrtpError
 from bridge import RTPBridge
 from phonebridge.audio import RTPPacket
+from phonebridge.agentphone_transcripts import (
+    AgentPhonePublisher, TranscriptCapture, from_sip_identity,
+)
 
 LOG=logging.getLogger('phonedex-sip-tls')
 MAX_HEADERS=8192
@@ -171,6 +175,13 @@ class SipsGateway:
         self.calls=0
         self.signal_writer=None
         self.signal_headers=None
+        # Opt-in only. No WAV/audio recording and no local transcript files.
+        self.transcript_publisher=(AgentPhonePublisher.from_env()
+                                   if getattr(args,'backend','echo')=='subscription' else None)
+        self.transcript_capture=None
+        self.transcript_from=None
+        self.transcript_started=None
+        self.transcript_tasks=set()
 
     def allowed(self,address):
         addr=ipaddress.ip_address(address)
@@ -183,8 +194,24 @@ class SipsGateway:
         self.call=None
         self.signal_writer=None
         self.signal_headers=None
+        captured=self.transcript_capture
+        caller=self.transcript_from
+        started=self.transcript_started
+        self.transcript_capture=None
+        self.transcript_from=None
+        self.transcript_started=None
         self.model.opts.on_media_idle=None
         await self.model.reset_call()
+        self.model.opts.call_control=None
+        if captured is not None:
+            turns=captured.close()
+            if self.transcript_publisher is not None and caller and started and turns:
+                # Best-effort independent background upload. Never stall SIP
+                # response, BYE, or model/audio cleanup on an HTTPS request.
+                task=asyncio.create_task(self.transcript_publisher.deliver(
+                    caller=caller, started_at=started, turns=turns))
+                self.transcript_tasks.add(task)
+                task.add_done_callback(self.transcript_tasks.discard)
 
     async def _send_dialog_bye(self,call,writer):
         """Emit an in-dialog BYE over the existing trusted SIP/TLS leg."""
@@ -281,6 +308,15 @@ class SipsGateway:
                                 self.call=Call(h['call-id'],media,h.get('from',''),h.get('to',''),h.get('via',''),local_tag,rx,tx)
                                 self.signal_writer=writer
                                 self.signal_headers=dict(h)
+                                caller=from_sip_identity(h.get('from'))
+                                if self.transcript_publisher is not None and caller:
+                                    self.transcript_capture=TranscriptCapture()
+                                    self.transcript_from=caller
+                                    self.transcript_started=datetime.now(timezone.utc).isoformat()
+                                else:
+                                    self.transcript_capture=None
+                                    self.transcript_from=None
+                                    self.transcript_started=None
                                 if self.media is not None:
                                     self.media.accepted=0;self.media.returned=0
                                 key64=base64.b64encode(local_key).decode('ascii')
@@ -325,6 +361,7 @@ class SipsGateway:
                     if self.call and self.signal_writer is writer:
                         call=self.call
                         self.model.opts.on_media_idle=lambda: self._on_inbound_media_idle(call,writer)
+                        self.model.opts.call_control=self.transcript_capture
                         self.model.activate_inbound(self.opts.media_port)
         except (OSError,ConnectionError) as exc:
             LOG.warning('SIP signaling transport closed (%s)',type(exc).__name__)
@@ -355,6 +392,10 @@ async def run(args):
     try:
         async with server:await server.serve_forever()
     finally:
+        for task in gateway.transcript_tasks:
+            task.cancel()
+        if gateway.transcript_tasks:
+            await asyncio.gather(*gateway.transcript_tasks, return_exceptions=True)
         media_socket.close()
         await model.close()
 

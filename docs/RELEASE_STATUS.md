@@ -1,6 +1,6 @@
 # PhoneDex — Experimental Release Status
 
-**Snapshot:** 2026-10-24 · v0.1.0-preview.4
+**Snapshot:** 2026-10-24 · v0.1.0-preview.5 candidate
 **Status:** Open-source experimental reference; not production ready.
 
 ## What is provided
@@ -18,7 +18,7 @@ guaranteed. Confirm service terms before deploying or making calls.
 - The initial public source snapshot was copied exclusively from tracked files
   of a previously tested private preview and initialized as a new Git root.
   No old Git commit history, private credentials, or private runtime logs were imported.
-- The portable Python suite contains 36 tests, including 14 setup/onboarding tests.
+- The initial public preview contained 36 tests; the updated suite includes 57 offline Python tests covering barge-in and optional AgentPhone transcript export.
   The suites passed the private source GitHub Actions workflow before migration.
   Public-repository CI is the authoritative check for the newly published repository.
 - Cloudflare Worker route tests pass offline; they do not make real phone calls.
@@ -26,6 +26,19 @@ guaranteed. Confirm service terms before deploying or making calls.
   private user paths, and image EXIF metadata. This heuristic cannot prove the
   absence of all possible sensitive data or vulnerabilities.
 - No carrier calls or production deployments are part of the offline tests.
+
+## Added after the initial public preview
+
+- Portable caller barge-in with queue flushing, RTP silence keepalive, and
+  immediate caller input priority over the synthetic greeting.
+- Optional AgentPhone transcript export using an explicit private API key and
+  phone-number ID; fail-closed matching, no WAV/audio recording, no disk spool,
+  no partial uploads or blind retry after an ambiguous POST.
+- 21 additional offline tests (57 total), run in CI.
+
+The live private gateway's call confirmed interruptions and provider
+transcript upload, but this portable implementation has only offline
+validation and is not a certification of third-party carrier behavior.
 
 ## Unverified and limitations
 

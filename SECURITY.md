@@ -18,6 +18,13 @@ where needed, honor opt-out requests and do not cold-call indiscriminately.
 Transcripts are stored in Worker KV for a bounded time (24h).
 The Cloudflare Worker does not store raw audio.
 
+**Optional AgentPhone transcript sync:** Disabled by default. Enabling
+`PHONEDEX_AGENTPHONE_TRANSCRIPTS_ENABLED` sends text containing possible
+personally identifiable details to a third party (AgentPhone) using the
+user's own private API key. No raw call audio or optional WAV recording
+module is shipped. Protect the token, restrict call access, provide required
+notice/consent, and review the provider's retention policy.
+
 **Credential boundary:** `AGENT_CONTROL_TOKEN` is for the calling agent;
 `VOICE_GATEWAY_TOKEN` stays in the local controller. Never commit `.env`,
 private logs, business profiles, Codex login files or provider keys.
