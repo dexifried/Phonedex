@@ -27,6 +27,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / 'vendor'))
 from pylibsrtp import Session, Policy
 from phonebridge.audio import RTPPacket
+from phonebridge.voicemail import VoicemailScreen
 from bridge import RTPBridge
 from sip_tls_gateway import Call, SecureMedia, parse_sdp
 from phonebridge.agentphone_trunk import load_credentials
@@ -160,6 +161,42 @@ class Gateway:
         self.model_port=0
 
 
+async def supervise_answer_screen(model: RTPBridge, screen: VoicemailScreen,
+                                  stop: asyncio.Event) -> str:
+    """Wait for a human answer or a completed beep. Never speak on uncertainty.
+
+    Not dependent on inbound RTP continuing forever: carriers sometimes
+    stop RTP after an IVR greeting. This watchdog cannot fabricate a beep.
+    """
+    clock=asyncio.get_running_loop()
+    start=clock.time()
+    while not screen.event.is_set():
+        elapsed=clock.time()-start
+        if elapsed>=3.6 and screen.frames==0:
+            screen.decide('human')
+        elif elapsed>=5.0 and not screen.machine and screen.frames>0 and screen.spoken==0:
+            # Initial silence/non-speech may indicate a quiet human; a
+            # partly heard greeting is never reclassified as human purely
+            # because wall-clock time elapsed. Long uncertain greetings
+            # fail closed rather than talking over a recording.
+            screen.decide('human')
+        elif elapsed>=27.0:
+            screen.decide('no_beep')
+        if not screen.event.is_set():
+            try:
+                await asyncio.wait_for(screen.event.wait(),timeout=.20)
+            except asyncio.TimeoutError:
+                pass
+    decision=screen.decision or 'no_beep'
+    if decision=='no_beep':
+        LOG.info('Voicemail screening gave no reliable beep; ending without a message')
+        stop.set()
+    else:
+        model.release_answer_screen(decision)
+    LOG.info('Outbound answering-machine screen result=%s',decision)
+    return decision
+
+
 async def play_outbound_greeting(model:RTPBridge, media_port:int, file_path:Path):
     """Play a bounded pre-rendered spoken greeting into the existing RTP sender.
 
@@ -215,13 +252,23 @@ async def dial(opts, control=None):
     prompt=(ROOT/template).read_text(encoding='utf-8')
     if assignment:
         prompt += '\nCall-specific instructions from the dispatch controller (not to be quoted or described as instructions):\n' + assignment
-    model_args=argparse.Namespace(backend='subscription',prompt=prompt,idle_seconds=45,codex_exe='codex',model_wake_file=opts.model_wake_file,call_control=control)
+    # Independent opt-in per outbound attempt; the incoming receptionist
+    # never uses voicemail screening.
+    voicemail_mode=getattr(opts,'voicemail_mode','auto')
+    if voicemail_mode not in ('auto','off'):
+        raise ValueError('Invalid voicemail mode')
+    screen=VoicemailScreen() if voicemail_mode=='auto' else None
+    model_args=argparse.Namespace(backend='subscription',prompt=prompt,idle_seconds=45,
+        codex_exe='codex',model_wake_file=opts.model_wake_file,call_control=control,
+        outbound_answer_screen=screen)
     model=RTPBridge(model_args)
     model_socket,_=await loop.create_datagram_endpoint(lambda:model,local_addr=('127.0.0.1',0))
     gateway.model_port=model_socket.get_extra_info('sockname')[1]
     media_socket,media_protocol=await loop.create_datagram_endpoint(lambda:SecureMedia(gateway),local_addr=('0.0.0.0',opts.media_port))
     writer=None
     greeting_task=None
+    screen_task=None
+    screen_abort=asyncio.Event()
     try:
         ctx=ssl.create_default_context()
         reader,writer=await asyncio.wait_for(asyncio.open_connection(hostname,port,ssl=ctx,server_hostname=('pstn.agentphone.ai' if hostname.endswith('.pstn.agentphone.ai') else hostname)),15)
@@ -261,7 +308,12 @@ async def dial(opts, control=None):
         # Avoid carrier/model deadlock: start GPT Live even if the carrier
         # waits for our first encrypted audio packet.
         model.activate_inbound(opts.media_port)
-        LOG.info('Outbound GPT Live primed before carrier RTP')
+        if screen is not None:
+            screen_task=asyncio.create_task(
+                supervise_answer_screen(model,screen,screen_abort))
+            LOG.info('Outbound call screening active; RTP silent pending decision')
+        else:
+            LOG.info('Outbound GPT Live primed before carrier RTP')
         if control:
             control.model=model
             await control.status('answered')
@@ -271,6 +323,7 @@ async def dial(opts, control=None):
             asyncio.create_task(hangup_event.wait()):'local_hangup',
             asyncio.create_task(watch_remote_disconnect(reader,writer)):'remote',
             asyncio.create_task(asyncio.sleep(opts.duration)):'duration',
+            asyncio.create_task(screen_abort.wait()):'voicemail_no_beep',
         }
         done,pending=await asyncio.wait(tasks,return_when=asyncio.FIRST_COMPLETED)
         winning=next(iter(done))
@@ -289,6 +342,9 @@ async def dial(opts, control=None):
             writer.write(request('BYE',uri,headers('BYE','z9hG4bK'+secrets.token_hex(8),dialog)))
             await writer.drain()
     finally:
+        if screen_task is not None:
+            screen_task.cancel()
+            await asyncio.gather(screen_task,return_exceptions=True)
         if control: control.model=None
         if greeting_task and not greeting_task.done():
             greeting_task.cancel()
@@ -313,6 +369,8 @@ def main():
     p.add_argument('--from-number',default='')
     p.add_argument('--media-port',type=int,default=41000)
     p.add_argument('--model-wake-file',default=None)
+    p.add_argument('--voicemail-mode',choices=('auto','off'),default='auto',
+                   help='detect a human answer or wait until the voicemail beep before GPT Live speaks')
     # Compatibility only: legacy test launcher still supplies this option.
     # The file is NEVER played to the caller, preventing dual voices/glitches.
     p.add_argument('--greeting-file',default=None,help=argparse.SUPPRESS)

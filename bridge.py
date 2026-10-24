@@ -18,6 +18,7 @@ from phonebridge.audio import RTPPacket, pcm16_to_ulaw, resample_pcm16, ulaw_to_
 from phonebridge.codex_live import CodexLive
 from phonebridge.subscription_live import SubscriptionLive
 from phonebridge.barge_in import BargeInDetector
+from phonebridge.voicemail import HUMAN_PROMPT, VOICEMAIL_PROMPT
 
 LOG = logging.getLogger('phonebridge')
 PHONE_FRAME = 160                 # samples / 20ms / G.711 PCMU at 8kHz
@@ -60,6 +61,9 @@ class RTPBridge(asyncio.DatagramProtocol):
         self._barge = BargeInDetector()
         self._playback_epoch = 0
         self._barge_cuts = 0
+        self._answer_screen = getattr(opts, 'outbound_answer_screen', None)
+        self._screen_pending = self._answer_screen is not None
+        self._base_prompt = getattr(opts, 'prompt', '')
 
     def connection_made(self, transport):
         self.transport = transport
@@ -82,9 +86,12 @@ class RTPBridge(asyncio.DatagramProtocol):
         if self.peer is None:
             self.peer = address
             LOG.info('Local RTP sender pinned: %s:%d', *address)
-            self.model_task = asyncio.create_task(self.model_loop())
+            if not self._screen_pending:
+                self.model_task = asyncio.create_task(self.model_loop())
         self.last_input = time.monotonic()
         decoded = ulaw_to_pcm16(packet.payload)
+        if self._screen_pending and self._answer_screen is not None:
+            self._answer_screen.feed(decoded)
         if rms_pcm16(decoded) >= 1200:
             self.received_voice_frames += 1
         if (self.received_voice_frames >= 3 and self._greeting_task is not None
@@ -107,18 +114,47 @@ class RTPBridge(asyncio.DatagramProtocol):
             self.inbound.put_nowait(frame)
 
     def activate_inbound(self, media_port: int):
-        """Start the model as soon as SIP answers, before carrier RTP arrives."""
+        """Start inbound GPT immediately, but screen outbound answers silently."""
         if not 1024 <= media_port <= 65535:
             raise ValueError('Invalid inbound media gateway port')
-        if self.peer is not None:
-            return
+        if self.peer is not None and self.peer != ('127.0.0.1',media_port):
+            raise ValueError('Media peer already pinned to another endpoint')
         self.peer = ('127.0.0.1', media_port)
         self.last_input = time.monotonic()
         self._barge.reset()
         self._playback_epoch += 1
-        if self.model_task is None or self.model_task.done():
+        if not self._screen_pending and (self.model_task is None or self.model_task.done()):
             self.model_task = asyncio.create_task(self.model_loop())
-        LOG.info('Inbound SIP answered: starting GPT Live before caller RTP')
+        if self._screen_pending:
+            LOG.info('Outbound SIP answer: silent voicemail screening before GPT Live starts')
+        else:
+            LOG.info('Inbound SIP answered: starting GPT Live before caller RTP')
+
+    def release_answer_screen(self, result: str) -> bool:
+        """Start an unspeaking outbound GPT session only after screening ends.
+
+        Voicemail is released only after a confirmed terminal beep. An unknown
+        or no-beep result intentionally remains silent.
+        """
+        if self._answer_screen is None or not self._screen_pending or not self.peer:
+            return False
+        if result not in ('human','voicemail_beep'):
+            return False
+        self._screen_pending = False
+        self.opts.prompt = self._base_prompt + (
+            VOICEMAIL_PROMPT if result=='voicemail_beep' else HUMAN_PROMPT)
+        # The model should not hear the old prerecorded greeting or beep as a
+        # fresh user request. Keep only the last second for an actual person.
+        if result=='voicemail_beep':
+            self.in_pcm.clear()
+            while not self.inbound.empty():
+                self.inbound.get_nowait()
+            self.received_voice_frames=0
+        self._playback_epoch += 1
+        if self.model_task is None or self.model_task.done():
+            self.model_task=asyncio.create_task(self.model_loop())
+        LOG.info('Outbound screening resolved: %s; GPT Live audio enabled',result)
+        return True
 
     def on_model_audio(self, pcm: bytes, sample_rate: int):
         if not pcm or not self.peer or len(pcm) % 2 or sample_rate < 8000:
@@ -207,7 +243,7 @@ class RTPBridge(asyncio.DatagramProtocol):
                 frame = await asyncio.wait_for(self.outbound.get(), timeout=.020)
                 synthetic_silence = False
             except asyncio.TimeoutError:
-                if not self._barge.suppressed:
+                if not self._barge.suppressed and not self._screen_pending:
                     continue
                 frame = bytes([0xFF]) * PHONE_FRAME
                 synthetic_silence = True
@@ -216,7 +252,8 @@ class RTPBridge(asyncio.DatagramProtocol):
             next_time = max(next_time, now)
             await asyncio.sleep(max(0.0, next_time - now))
             if (self.peer and epoch == self._playback_epoch and
-                    (synthetic_silence or not self._barge.suppressed)):
+                    (synthetic_silence or (not self._barge.suppressed and
+                                           not self._screen_pending))):
                 packet = RTPPacket(self.seq, self.timestamp, self.ssrc, frame)
                 self.transport.sendto(packet.pack(), self.peer)
                 if not synthetic_silence:
@@ -260,6 +297,7 @@ class RTPBridge(asyncio.DatagramProtocol):
         """Discard a caller's media/model state before accepting another call."""
         self.peer = None
         self._barge.reset()
+        self._screen_pending = False
         self._playback_epoch += 1
         if self.model_task:
             task = self.model_task
