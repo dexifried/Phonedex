@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from phonebridge.audio import RTPPacket, pcm16_to_ulaw, resample_pcm16, ulaw_to_pcm16, rms_pcm16
 from phonebridge.codex_live import CodexLive
 from phonebridge.subscription_live import SubscriptionLive
+from phonebridge.barge_in import BargeInDetector
 
 LOG = logging.getLogger('phonebridge')
 PHONE_FRAME = 160                 # samples / 20ms / G.711 PCMU at 8kHz
@@ -55,6 +56,10 @@ class RTPBridge(asyncio.DatagramProtocol):
         self.model_task = None
         self.speaker_task = None
         self.idle_task = None
+        self._greeting_task = None
+        self._barge = BargeInDetector()
+        self._playback_epoch = 0
+        self._barge_cuts = 0
 
     def connection_made(self, transport):
         self.transport = transport
@@ -82,6 +87,16 @@ class RTPBridge(asyncio.DatagramProtocol):
         decoded = ulaw_to_pcm16(packet.payload)
         if rms_pcm16(decoded) >= 1200:
             self.received_voice_frames += 1
+        if (self.received_voice_frames >= 3 and self._greeting_task is not None
+                and not self._greeting_task.done()):
+            self._greeting_task.cancel()
+        if self._barge.note_caller(decoded, output_waiting=not self.outbound.empty()):
+            self._playback_epoch += 1
+            self._barge_cuts += 1
+            self.out_pcm.clear()
+            while not self.outbound.empty():
+                self.outbound.get_nowait()
+            LOG.info('Caller barge-in cut %s; buffered audio discarded', self._barge_cuts)
         pcm24 = resample_pcm16(decoded, 8000, 24000)
         self.in_pcm.extend(pcm24)
         while len(self.in_pcm) >= LIVE_CHUNK_BYTES:
@@ -99,6 +114,8 @@ class RTPBridge(asyncio.DatagramProtocol):
             return
         self.peer = ('127.0.0.1', media_port)
         self.last_input = time.monotonic()
+        self._barge.reset()
+        self._playback_epoch += 1
         if self.model_task is None or self.model_task.done():
             self.model_task = asyncio.create_task(self.model_loop())
         LOG.info('Inbound SIP answered: starting GPT Live before caller RTP')
@@ -113,6 +130,8 @@ class RTPBridge(asyncio.DatagramProtocol):
         while len(self.out_pcm) >= PHONE_FRAME * 2:
             chunk = bytes(self.out_pcm[:PHONE_FRAME * 2])
             del self.out_pcm[:PHONE_FRAME * 2]
+            if not self._barge.should_forward_model_audio(chunk):
+                continue
             if self.outbound.full():
                 self.outbound.get_nowait()  # stale audio > extra latency
             self.outbound.put_nowait(pcm16_to_ulaw(chunk))
@@ -135,7 +154,7 @@ class RTPBridge(asyncio.DatagramProtocol):
         LOG.info('Priming GPT Live to greet the caller in its own voice')
         # Feed approximately realtime into model audio input.
         for offset in range(0, len(pcm), LIVE_CHUNK_BYTES):
-            if not self.peer or self.received_voice_frames > 8:
+            if not self.peer or self.received_voice_frames >= 3:
                 LOG.info('Skipped model wake greeting: caller speaking or disconnected')
                 return
             frame = pcm[offset:offset + LIVE_CHUNK_BYTES]
@@ -146,7 +165,7 @@ class RTPBridge(asyncio.DatagramProtocol):
         # An additional brief silent tail lets end-of-utterance detection
         # finalize the greeting, without delaying the inbound model stream.
         for _ in range(5):
-            if not self.peer:
+            if not self.peer or self.received_voice_frames >= 3:
                 return
             await self.backend.push(bytes(LIVE_CHUNK_BYTES))
             await asyncio.sleep(0.10)
@@ -162,7 +181,8 @@ class RTPBridge(asyncio.DatagramProtocol):
         try:
             await self.backend.start()
             if getattr(self.opts, 'model_wake_file', None) and self.opts.backend == 'subscription':
-                await self._prime_model_greeting(Path(self.opts.model_wake_file))
+                self._greeting_task = asyncio.create_task(
+                    self._prime_model_greeting(Path(self.opts.model_wake_file)))
             while self.peer:
                 data = await self.inbound.get()
                 await self.backend.push(data)
@@ -171,6 +191,11 @@ class RTPBridge(asyncio.DatagramProtocol):
         except Exception as exc:
             LOG.error('Live backend unavailable: %s', exc)
         finally:
+            if self._greeting_task is not None:
+                greeting = self._greeting_task
+                self._greeting_task = None
+                greeting.cancel()
+                await asyncio.gather(greeting, return_exceptions=True)
             if self.backend:
                 await self.backend.close()
             self.backend = None
@@ -178,19 +203,30 @@ class RTPBridge(asyncio.DatagramProtocol):
     async def speaker(self):
         next_time = time.monotonic()
         while True:
-            frame = await self.outbound.get()
+            try:
+                frame = await asyncio.wait_for(self.outbound.get(), timeout=.020)
+                synthetic_silence = False
+            except asyncio.TimeoutError:
+                if not self._barge.suppressed:
+                    continue
+                frame = bytes([0xFF]) * PHONE_FRAME
+                synthetic_silence = True
+            epoch = self._playback_epoch
             now = time.monotonic()
             next_time = max(next_time, now)
             await asyncio.sleep(max(0.0, next_time - now))
-            if self.peer:
+            if (self.peer and epoch == self._playback_epoch and
+                    (synthetic_silence or not self._barge.suppressed)):
                 packet = RTPPacket(self.seq, self.timestamp, self.ssrc, frame)
                 self.transport.sendto(packet.pack(), self.peer)
+                if not synthetic_silence:
+                    self._barge.note_sent(ulaw_to_pcm16(frame))
                 self.sent_rtp += 1
                 if any(b not in (0xFF, 0x7F) for b in frame):
                     self.sent_non_silent_rtp += 1
                 self.seq = (self.seq + 1) & 65535
                 self.timestamp = (self.timestamp + PHONE_FRAME) & 0xffffffff
-            next_time += 0.02
+            next_time += .02
 
     async def idle(self):
         while True:
@@ -202,6 +238,8 @@ class RTPBridge(asyncio.DatagramProtocol):
                     self.model_task.cancel()
                     await asyncio.gather(self.model_task, return_exceptions=True)
                     self.model_task = None
+                self._barge.reset()
+                self._playback_epoch += 1
                 self.in_pcm.clear()
                 self.out_pcm.clear()
                 while not self.outbound.empty():
@@ -221,6 +259,8 @@ class RTPBridge(asyncio.DatagramProtocol):
     async def reset_call(self):
         """Discard a caller's media/model state before accepting another call."""
         self.peer = None
+        self._barge.reset()
+        self._playback_epoch += 1
         if self.model_task:
             task = self.model_task
             self.model_task = None
@@ -241,6 +281,8 @@ class RTPBridge(asyncio.DatagramProtocol):
             self.model_audio_callbacks, self.sent_rtp, self.sent_non_silent_rtp,
         )
         self.peer = None
+        self._barge.reset()
+        self._playback_epoch += 1
         for task in (self.speaker_task, self.idle_task, self.model_task):
             if task: task.cancel()
         tasks = [t for t in (self.speaker_task, self.idle_task, self.model_task) if t]

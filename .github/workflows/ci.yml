@@ -20,7 +20,7 @@ jobs:
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
       - name: Offline Python tests
-        run: python -m unittest test_agent_controller test_harness_live_adapter test_sip_teardown test_onboarding
+        run: python -m unittest test_agent_controller test_harness_live_adapter test_sip_teardown test_onboarding test_barge_in test_agentphone_transcripts
       - name: Release secret and file audit
         run: python scripts/release_audit.py
 
