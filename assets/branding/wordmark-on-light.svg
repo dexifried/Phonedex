@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="940" height="230" viewBox="0 0 940 230" role="img" aria-labelledby="title desc">
+  <title id="title">Phonedex</title>
+  <desc id="desc">Phonedex wordmark with an original call-loop audio glyph as the letter o.</desc>
+  <defs>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#138bd6"/>
+      <stop offset=".52" stop-color="#4d58da"/>
+      <stop offset="1" stop-color="#7850d6"/>
+    </linearGradient>
+  </defs>
+  <text x="60" y="166" fill="#101526" font-family="Segoe UI, Inter, Arial, sans-serif" font-size="180" font-weight="600" letter-spacing="-2">Ph</text>
+  <circle cx="324" cy="116" r="46" fill="none" stroke="url(#accent)" stroke-width="11"/>
+  <path d="M293 116h13l12-17 13 34 12-25h14" fill="none" stroke="#101526" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="378" y="166" fill="#101526" font-family="Segoe UI, Inter, Arial, sans-serif" font-size="180" font-weight="600" letter-spacing="-2">nedex</text>
+</svg>

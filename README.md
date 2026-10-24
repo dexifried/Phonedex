@@ -1,0 +1,234 @@
+# PhoneDex
+
+<p align="center">
+  <img src="assets/branding/hero.jpg" alt="PhoneDex — a self-hosted SIP bridge for Codex-authenticated GPT Live." width="100%">
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/github/license/dexifried/Phonedex?style=flat&label=license"></a>
+  <img alt="Experimental preview" src="https://img.shields.io/badge/status-experimental-7668ff?style=flat">
+</p>
+
+<p align="center"><strong>Self-hosted SIP telephony connected to GPT Live through Codex authentication.</strong></p>
+
+> [!WARNING]
+> PhoneDex is an experimental source preview, not a production-ready telephone service or a hardened SIP border controller. It uses an undocumented GPT Live subscription endpoint whose availability and authorized use are not guaranteed.
+
+[Overview](#overview) · [Features](#features) · [Architecture](#architecture) · [Quickstart](#quickstart) · [Troubleshooting](#troubleshooting) · [Limitations](#limitations-and-roadmap) · [Documentation](#documentation)
+
+## Overview
+
+PhoneDex connects a SIP telephone call to a GPT Live voice session through a self-hosted Python media bridge. An optional Cloudflare Worker and KV namespace provide an authenticated control plane for remote agents to queue outbound calls, inspect status and transcripts, privately steer a live session, and request hangup.
+
+Unlike a typical API-key voice agent, PhoneDex reads a local Codex CLI login and negotiates with a subscription-backed GPT Live endpoint. That endpoint is undocumented and is not the public Realtime API. Access may change or be restricted; you are responsible for confirming that your use is permitted. SIP carrier charges still apply, and PhoneDex has no API-key or paid-inference fallback. PhoneDex is an independent project with no OpenAI, Codex, or AgentPhone endorsement.
+
+## Set up with your coding agent
+
+**Have Codex, Claude Code, Cursor, or another coding agent with terminal access?** Copy this entire prompt into the agent. It can inspect your machine, guide your logins and configure PhoneDex for you instead of making you follow every step manually.
+
+```text
+Set up PhoneDex on my computer using its official repository:
+https://github.com/dexifried/Phonedex
+
+You have permission to inspect my local environment and prepare the project,
+but do not assume permission for chargeable calls or external changes.
+
+1. Clone the repository (or locate my existing checkout), read the README,
+   SECURITY.md, docs/RELEASE_STATUS.md and any onboarding instructions.
+   Check the actual available CLI commands before using them.
+2. Ask whether I want (A) local outbound calling, (B) remote agent control
+   through my own Cloudflare account, or (C) advanced inbound calling.
+   Start with the simplest supported path; Cloudflare is optional for A.
+3. Check my OS, Python/Node availability, Codex CLI and SIP-provider
+   compatibility. Explain missing prerequisites, and get my approval before
+   installing packages or changing system settings. Prefer an isolated Python
+   environment rather than installing packages globally.
+4. Guide me through Codex login and provider login using their normal local
+   authentication flows. Do not ask me to paste passwords, API keys, SIP
+   credentials, OAuth tokens or auth.json contents into your chat. Enter
+   secrets through private local prompts/configuration; never print, upload,
+   commit or share them.
+5. If available, use "python phonedex.py setup --check" and the interactive
+   "python phonedex.py setup" wizard. Otherwise follow the documented
+   .env.example and "python phonedex.py doctor" flow. Do not overwrite any
+   existing configuration without my explicit approval.
+6. For remote control, ask approval before creating Cloudflare resources,
+   deploying Workers, changing DNS, or setting secrets. For inbound calling,
+   explain TLS/SRTP, firewall, public IP, carrier routing and port forwarding.
+   Never open ports or enable calling without permission.
+7. Run the documented offline tests and a dry-run dial only to a number I
+   have explicitly approved. NEVER place a real call, enable paid services,
+   make purchases, or deploy to production without asking me first.
+8. At the end, report what is working, what's not yet verified, any security
+   or billing risks, and the exact next action required from me.
+
+Important: PhoneDex is experimental and uses an undocumented GPT Live
+subscription endpoint. Verify applicable authorization/terms; do not assume
+that an existing ChatGPT/Codex subscription grants production calling rights.
+Do not claim success until the relevant checks actually pass.
+```
+
+> **Manual setup instead?** Continue to the [Quickstart](#quickstart). The agent prompt is an installation guide, **not** a one-click installer: SIP-provider credentials, account sign-ins, networking and real phone calls may still require your participation.
+
+## Features
+
+### Implemented in this repository
+
+- SIP over TLS with PCMU audio and SDES-SRTP media; the gateway rejects plain RTP offers.
+- Duplex WebRTC voice sessions connected to GPT Live using the local Codex OAuth cache.
+- A self-hosted controller that polls the Worker over outbound HTTPS and does not expose a public management listener.
+- Optional Worker control routes for dispatch, status, transcripts, private steering, command acknowledgements, and hangup.
+- Normal and business prompt modes. Business mode can read a local profile and a read-only calendar snapshot. It does not book appointments or send messages.
+- Default-deny outbound recipient allowlisting, per-day call limits, a one-call concurrency limit, and separate operator and gateway bearer secrets.
+- Transcript normalization, duplicate suppression across event sources, and retries for failed transcript uploads.
+
+### Experimental or not verified
+
+- Public inbound SIP listening is opt-in and requires a trusted TLS certificate, explicit carrier source ranges, and a verified SRTP media path.
+- The SIP implementation is not a complete transaction stack or certified SBC. Provider, NAT, TLS, and SDP compatibility outside the limited validation recorded in the [release status](docs/RELEASE_STATUS.md) is unknown.
+- Transcripts are model-generated text, can be delayed by polling and KV consistency, and are not certified verbatim records.
+- A consent-gated lead-storage helper writes to local SQLite, but the live voice delegation path does not call it yet.
+- The subscription endpoint and private steering event can change without notice. Steering does not guarantee that the model will follow an instruction.
+
+### Planned
+
+- Cold transfer to a preapproved human destination.
+- Warm three-way introduction followed by a direct human-to-human conversation.
+- Complete GPT Live and WebRTC shutdown after a successful handoff.
+- More reliable SIP lifecycle handling, faster startup, and simpler deployment.
+
+Human transfer is **not implemented**. The [handoff document](docs/CALL_HANDOFF_SPEC.md) is a specification, not an implementation promise.
+
+## Architecture
+
+<p align="center">
+  <img src="assets/branding/architecture.svg" alt="Phone carrier audio flows through the PhoneDex SIP/TLS gateway, RTP bridge, and GPT Live. Remote call control flows through Cloudflare Worker and KV to the local controller." width="100%">
+</p>
+
+The Worker handles call instructions and text metadata. It does not receive raw audio or SIP credentials. Transcript text may be stored in KV for up to 24 hours.
+
+## Quickstart
+
+### Prerequisites
+
+- Python 3.11 or newer.
+- Codex CLI logged into a ChatGPT account that can access the required session.
+- A SIP provider configured for TLS signaling, PCMU, and SDES-SRTP. Public inbound use also needs a trusted certificate, source-IP allowlisting, and reachable UDP media port.
+- Node.js for the Worker tests and Wrangler CLI. Use a currently supported Node.js release for Wrangler.
+- A Cloudflare account and Workers KV namespace only if you want remote agent controls.
+
+PhoneDex has not been verified across arbitrary SIP providers. A dry run and the offline test suites do not make a real call.
+
+### Install and authenticate
+
+From a terminal:
+
+```sh
+git clone https://github.com/dexifried/Phonedex.git
+cd Phonedex
+python -m pip install -r requirements.txt
+codex login
+```
+
+**Recommended:** use the guided setup wizard. It runs locally, does not place phone calls or deploy anything, and refuses to overwrite an existing `.env`:
+
+```sh
+python phonedex.py setup --check
+python phonedex.py setup
+```
+
+For manual setup **instead**, copy the example configuration to a private local file:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+On macOS or Linux, use `cp .env.example .env`. Edit `.env` with your SIP termination URI, public IP, caller ID, SIP credentials, media port, and—if using remote control—the Worker URL and gateway token. Keep `PHONEDEX_ALLOWED_RECIPIENTS` empty until you are ready to authorize specific E.164 destinations. Set `PHONEDEX_MEDIA_PORT_FORWARDED=1` only after the SRTP UDP port is actually forwarded. Never commit `.env`.
+
+### Optional: remote agent control
+
+Create a KV namespace and use its returned ID in a private copy of `worker/wrangler.toml.example`:
+
+```sh
+cd worker
+npx wrangler kv namespace create STORE
+```
+
+```powershell
+Copy-Item wrangler.toml.example wrangler.toml
+```
+
+On macOS or Linux, use `cp wrangler.toml.example wrangler.toml`. Replace the placeholder namespace ID in `wrangler.toml`, then deploy the Worker and add two independent random secrets:
+
+```sh
+npx wrangler deploy
+npx wrangler secret put AGENT_CONTROL_TOKEN
+npx wrangler secret put VOICE_GATEWAY_TOKEN
+```
+
+Each secret command prompts for a value and deploys a Worker version. Put the `VOICE_GATEWAY_TOKEN` value in local `.env` as `PHONEDEX_GATEWAY_TOKEN`; keep `AGENT_CONTROL_TOKEN` separate and give it only to the remote calling agent. Set `PHONEDEX_GATEWAY_URL` to the deployed Worker URL ending in `/agent/gateway`. The local `worker/wrangler.toml` is ignored by Git.
+
+### Check configuration and run
+
+From the repository root, install dependencies before running the offline tests:
+
+```sh
+python phonedex.py doctor
+python -m unittest test_agent_controller test_harness_live_adapter test_sip_teardown test_onboarding
+node worker/test-agent.mjs
+```
+
+The tests are offline and place no calls. `doctor` reports whether configuration and dependencies are present without printing credentials.
+
+To run the remote controller in the foreground:
+
+```sh
+python phonedex.py controller
+```
+
+It makes outbound HTTPS requests to the Worker. It does not open a public HTTP management port.
+
+For a local dry run, replace the placeholder with a destination already present in `PHONEDEX_ALLOWED_RECIPIENTS`:
+
+```sh
+python phonedex.py dial --to YOUR_ALLOWLISTED_E164 --mode normal --duration 45 --prompt "Ask whether now is a good time to talk"
+```
+
+This command does not place a call. Adding `--place-call` initiates a real SIP call; do so only after validating the provider, recipient authorization, media routing, and applicable consent requirements. See `python phonedex.py dial --help` for the current options.
+
+## Troubleshooting
+
+| Symptom | Check |
+| --- | --- |
+| `doctor` reports missing Python packages | Install `requirements.txt` with the same Python interpreter used to run PhoneDex. |
+| A recipient is blocked | The allowlist is empty by default; add only an explicitly authorized E.164 destination to local `.env`. |
+| An inbound call is rejected | Inspect the negotiated SDP media profile. SIP/TLS alone is not enough; PhoneDex requires SDES-SRTP and will reject plain RTP. |
+| A transcript is delayed or missing | The controller batches transcript events and Cloudflare KV is eventually consistent. Check the gateway URL and the separate gateway secret; transcript text expires after 24 hours. |
+| You need current command options | Run `python phonedex.py --help`, `python phonedex.py dial --help`, or `python sip_tls_gateway.py --help`. |
+
+## Limitations and roadmap
+
+- One outbound call at a time; no complete SIP transaction stack, broad fuzzing, production security audit, or commercial SLA.
+- Generic Linux/macOS installation and arbitrary carrier compatibility are unverified. The current release notes record offline Windows validation; that is not a carrier compatibility guarantee.
+- Inbound media requires SRTP even when SIP signaling itself uses TLS. PhoneDex will reject plain RTP rather than silently downgrade audio privacy.
+- Business tools do not book appointments or deliver lead notifications. The consent-gated lead-storage helper is not wired to live calls yet.
+- Human call transfers, warm handoffs, and GPT Live shutdown after transfer remain planned work.
+
+The [roadmap and release review](docs/RELEASE_STATUS.md) records current verification and known risks.
+
+## Documentation
+
+- [Guided setup and readiness checks](docs/ONBOARDING.md) — interactive local configuration, remote control options, and remaining manual steps.
+- [Technical notes](docs/TECHNICAL_NOTES.md) — media, control, authentication, and data boundaries.
+- [Release status](docs/RELEASE_STATUS.md) — verified behavior, risks, and review guidance.
+- [Public preview.4 release notes](docs/RELEASE_NOTES_v0.1.0-preview.4.md) — clean-history experimental source preview.
+- [Security policy](SECURITY.md) — credentials, calling consent, transcripts, and vulnerability reporting.
+- [Human call handoff specification](docs/CALL_HANDOFF_SPEC.md) — planned behavior only; no transfer implementation.
+- [Third-party notices](THIRD_PARTY_NOTICES.md) — Hermes Talk attribution and preserved MIT license.
+- [Contributing](CONTRIBUTING.md) — offline development and review expectations.
+
+## Attribution and license
+
+PhoneDex is created and maintained by Dexifyz (Austin Harvey) and is MIT-licensed. The GPT Live WebRTC negotiation and audio approach was informed by and adapted from TheSmokeDev's [Hermes Talk](https://github.com/TheSmokeDev/hermes-talk); its copyright and MIT license are preserved in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and [licenses/HERMES_TALK_LICENSE.txt](licenses/HERMES_TALK_LICENSE.txt). PhoneDex is not affiliated with or endorsed by OpenAI, Codex, AgentPhone, or Hermes Talk.
+
+The subscription-backed GPT Live endpoint is undocumented, can change or become unavailable, and does not establish authorization to use it. Review the applicable service terms before use. Calls can incur SIP carrier charges even though PhoneDex does not use an OpenAI API key.

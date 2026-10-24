@@ -1,0 +1,5 @@
+# System Python 3.11+; packages are installed locally by the user.
+aiortc>=1.13,<2
+av>=14,<18
+pylibsrtp>=1.0,<2
+websockets>=15,<17

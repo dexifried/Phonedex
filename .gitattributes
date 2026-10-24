@@ -1,0 +1,8 @@
+# Normalize repository text; do not change binary artifacts
+* text=auto
+*.py text eol=lf
+*.md text eol=lf
+*.mjs text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.toml text eol=lf

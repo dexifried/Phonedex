@@ -1,0 +1,12 @@
+name = "phonedex-control"
+main = "src/index.mjs"
+compatibility_date = "2026-10-01"
+workers_dev = true
+
+[[kv_namespaces]]
+binding = "STORE"
+id = "PASTE_YOUR_KV_NAMESPACE_ID_HERE"
+
+# Create two separate Worker secrets:
+# AGENT_CONTROL_TOKEN = bearer for your agents
+# VOICE_GATEWAY_TOKEN = secret used ONLY by your PC controller

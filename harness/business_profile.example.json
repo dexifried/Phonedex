@@ -1,0 +1,19 @@
+{
+  "name": "Example Organization",
+  "description": "Configure this profile before enabling business mode.",
+  "disclosure": "The phone assistant is AI.",
+  "services": [
+    {
+      "name": "Example Service",
+      "description": "Replace this"
+    }
+  ],
+  "contact": {
+    "email": "contact@example.invalid",
+    "website": "https://example.invalid"
+  },
+  "pricing_policy": "Contact the organization for pricing.",
+  "hours_policy": "Hours are not configured.",
+  "service_area_note": "Service area not configured.",
+  "booking_policy": "Booking is not connected."
+}

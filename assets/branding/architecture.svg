@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="1320" viewBox="0 0 640 1320" role="img" aria-labelledby="title desc">
+  <title id="title">PhoneDex architecture</title>
+  <desc id="desc">Telephone media flows between a carrier, PhoneDex SIP and SRTP gateway, RTP/WebRTC bridge, and GPT Live. A separate remote control path connects an agent through Cloudflare Worker and KV to the local controller, which initiates outbound HTTPS polling.</desc>
+  <defs>
+    <linearGradient id="panel" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#111a2d"/>
+      <stop offset="1" stop-color="#0b1020"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#51c5ff"/>
+      <stop offset=".52" stop-color="#6979ff"/>
+      <stop offset="1" stop-color="#a27cff"/>
+    </linearGradient>
+    <marker id="arrow" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto-start-reverse">
+      <path d="M0 0L9 4.5L0 9z" fill="#83a4ff"/>
+    </marker>
+    <style>
+      .heading{font:700 21px 'Segoe UI',Inter,Arial,sans-serif;letter-spacing:1.8px;fill:#91a4d1}
+      .title{font:650 24px 'Segoe UI',Inter,Arial,sans-serif;fill:#f4f7ff}
+      .body{font:400 18px 'Segoe UI',Inter,Arial,sans-serif;fill:#b9c4dc}
+      .note{font:500 17px 'Segoe UI',Inter,Arial,sans-serif;fill:#a9b8dc}
+      .node{fill:url(#panel);stroke:#293656;stroke-width:2}
+      .edge{fill:none;stroke:#83a4ff;stroke-width:3;marker-start:url(#arrow);marker-end:url(#arrow)}
+    </style>
+  </defs>
+  <rect x="1" y="1" width="638" height="1318" rx="26" fill="#070a13" stroke="#202b43" stroke-width="2"/>
+  <text x="38" y="54" class="heading">MEDIA PLANE</text>
+
+  <rect x="46" y="82" width="548" height="100" rx="17" class="node"/>
+  <circle cx="82" cy="132" r="10" fill="#57c7ff"/>
+  <text x="108" y="127" class="title">Phone carrier / PSTN</text>
+  <text x="108" y="157" class="body">Telephone network and SIP trunk</text>
+
+  <path d="M320 184v34" class="edge"/>
+  <text x="346" y="207" class="note">TLS + SDES-SRTP</text>
+
+  <rect x="46" y="222" width="548" height="100" rx="17" class="node"/>
+  <circle cx="82" cy="272" r="10" fill="#7186ff"/>
+  <text x="108" y="267" class="title">PhoneDex SIP/TLS gateway</text>
+  <text x="108" y="297" class="body">Signaling · SRTP media termination</text>
+
+  <path d="M320 324v34" class="edge"/>
+  <text x="346" y="347" class="note">SRTP → RTP / PCMU</text>
+
+  <rect x="46" y="362" width="548" height="100" rx="17" class="node"/>
+  <circle cx="82" cy="412" r="10" fill="#7b84ff"/>
+  <text x="108" y="407" class="title">RTP / WebRTC media bridge</text>
+  <text x="108" y="437" class="body">Audio conversion · duplex media</text>
+
+  <path d="M320 464v34" class="edge"/>
+  <text x="346" y="487" class="note">WebRTC audio</text>
+
+  <rect x="46" y="502" width="548" height="100" rx="17" class="node"/>
+  <circle cx="82" cy="552" r="10" fill="#a078ff"/>
+  <text x="108" y="547" class="title">GPT Live</text>
+  <text x="108" y="577" class="body">Codex-authenticated · undocumented endpoint</text>
+
+  <line x1="38" y1="652" x2="602" y2="652" stroke="#202b43" stroke-width="2"/>
+  <text x="38" y="706" class="heading">REMOTE CONTROL PLANE</text>
+
+  <rect x="46" y="734" width="548" height="100" rx="17" class="node"/>
+  <circle cx="82" cy="784" r="10" fill="#57c7ff"/>
+  <text x="108" y="779" class="title">Remote calling agent</text>
+  <text x="108" y="809" class="body">Authenticated HTTPS requests</text>
+
+  <path d="M320 836v34" class="edge"/>
+  <text x="346" y="859" class="note">Bearer HTTPS API</text>
+
+  <rect x="46" y="874" width="548" height="100" rx="17" class="node"/>
+  <circle cx="82" cy="924" r="10" fill="#7186ff"/>
+  <text x="108" y="919" class="title">Cloudflare Worker + KV</text>
+  <text x="108" y="949" class="body">Calls / commands: 3 h · transcripts: 24 h</text>
+
+  <path d="M320 986v34" class="edge"/>
+  <text x="346" y="1009" class="note">Outbound HTTPS poll + events</text>
+
+  <rect x="46" y="1024" width="548" height="100" rx="17" class="node"/>
+  <circle cx="82" cy="1074" r="10" fill="#a078ff"/>
+  <text x="108" y="1069" class="title">Self-hosted Python controller</text>
+  <text x="108" y="1099" class="body">Dials allowed recipients · keeps SIP credentials local</text>
+
+  <text x="38" y="1192" class="note">Worker receives no raw audio or SIP credentials.</text>
+  <text x="38" y="1223" class="note">Transcript text may be retained for up to 24 hours.</text>
+</svg>
