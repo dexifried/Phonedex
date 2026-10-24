@@ -229,7 +229,11 @@ class Controller:
                 termination_uri=TERMINATION,public_ip=PUBLIC_IP,
                 to=call["to"],from_number=CALLER,media_port=OUTBOUND_PORT,
                 duration=call["duration_seconds"],mode=call["mode"],
-                call_prompt=call["prompt"],model_wake_file=(str(ROOT/"model_wake_prompt.wav") if (ROOT/"model_wake_prompt.wav").is_file() else None),
+                call_prompt=call["prompt"],
+                model_wake_file=(
+                    os.environ.get("PHONEDEX_MODEL_WAKE_FILE") or
+                    (str(ROOT/"model_wake_prompt.wav") if (ROOT/"model_wake_prompt.wav").is_file() else None)),
+                voicemail_mode=os.environ.get("PHONEDEX_VOICEMAIL_MODE","auto"),
                 greeting_file=None)
             await session.status("dialing")
             await dial(opts,control=session)

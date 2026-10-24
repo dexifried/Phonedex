@@ -13,6 +13,30 @@ These notes describe the code in this repository. They are not a provider compat
 
 The standalone `bridge.py` and SIP gateway CLIs also expose an echo backend for local development. The application path described above is experimental; neither mode replaces provider-specific SIP validation.
 
+## Outbound voicemail answer screening
+
+The optional `phonebridge/voicemail.py` state machine receives decoded
+20ms/8-kHz PCM16 RTP frames after an outbound SIP answer. Unlike the inbound
+receptionist, the outgoing GPT Live task is **deferred** until:
+
+1. A short voiced greeting followed by a human-style pause indicates a person.
+2. A longer machine-style greeting and a stable narrowband terminal beep
+   indicate voicemail; the beep must first end (an additional ~80ms guard).
+
+Beep detection uses bounded 400–1650 Hz Goertzel bins (50 Hz spacing),
+narrow-band dominance, minimum duration and preceding non-tonal speech.
+After a classified voicemail beep, old greeting input is discarded and the
+model is started with voicemail-specific instructions. The existing optional
+model-wake WAV triggers GPT Live's first speech. All other audio remains
+ephemeral; no call recording is added.
+
+If a suspected machine doesn't yield a confirmed beep within 25 seconds,
+the outgoing SIP call is ended without an attempted message. The detector
+can misclassify, and normal human answers can be delayed, especially long
+greetings. There is no telephony-provider AMD webhook or third-party ASR.
+The watchdog cannot fabricate a beep and does not launch the model merely
+because a lengthy greeting was inconclusive.
+
 ## Control path
 
 - A remote agent calls the Cloudflare Worker with the operator bearer token.

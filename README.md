@@ -77,6 +77,7 @@ Do not claim success until the relevant checks actually pass.
 - SIP over TLS with PCMU audio and SDES-SRTP media; the gateway rejects plain RTP offers.
 - Duplex WebRTC voice sessions connected to GPT Live using the local Codex OAuth cache.
 - Caller barge-in: sustained caller speech clears queued AI audio, sends quiet RTP during interruption, and lets the caller finish. Local echo rejection reduces false triggers.
+- **Outbound voicemail screening:** hold GPT Live silent while checking for a live human versus a long answering-machine greeting. For probable voicemail, wait until a narrowband beep has *finished* before allowing the agent to leave a message; abandon without speaking if no beep is confidently found.
 - A self-hosted controller that polls the Worker over outbound HTTPS and does not expose a public management listener.
 - Optional Worker control routes for dispatch, status, transcripts, private steering, command acknowledgements, and hangup.
 - Normal and business prompt modes. Business mode can read a local profile and a read-only calendar snapshot. It does not book appointments or send messages.
@@ -90,6 +91,7 @@ Do not claim success until the relevant checks actually pass.
 - The SIP implementation is not a complete transaction stack or certified SBC. Provider, NAT, TLS, and SDP compatibility outside the limited validation recorded in the [release status](docs/RELEASE_STATUS.md) is unknown.
 - Transcripts are model-generated text, can be delayed by polling and KV consistency, and are not certified verbatim records.
 - Barge-in is an RTP playback cutoff, not a documented GPT Live model-level cancellation; false positives and imperfect response resumption remain possible.
+- Voicemail screening is heuristic, and can mistake a long human greeting or unusually short recorded greeting. Machine calls without a recognizable beep are not left a message. Generic voicemail speaking needs an optional local 24-kHz WAV wake primer, which is not bundled.
 - A consent-gated lead-storage helper writes to local SQLite, but the live voice delegation path does not call it yet.
 - The subscription endpoint and private steering event can change without notice. Steering does not guarantee that the model will follow an instruction.
 
@@ -171,6 +173,44 @@ npx wrangler secret put VOICE_GATEWAY_TOKEN
 
 Each secret command prompts for a value and deploys a Worker version. Put the `VOICE_GATEWAY_TOKEN` value in local `.env` as `PHONEDEX_GATEWAY_TOKEN`; keep `AGENT_CONTROL_TOKEN` separate and give it only to the remote calling agent. Set `PHONEDEX_GATEWAY_URL` to the deployed Worker URL ending in `/agent/gateway`. The local `worker/wrangler.toml` is ignored by Git.
 
+### Outbound voicemail: stay silent until the beep
+
+PhoneDex screens **outbound answered calls only** (never the inbound receptionist).
+During screening it sends quiet RTP to keep the carrier connection alive, but
+**does not start GPT Live speaking**. A short hello followed by silence is
+treated as a person and released for a normal conversation. A prolonged
+recorded greeting remains silent while the detector listens for a sustained
+narrowband beep; it only releases the agent when that beep has **finished**.
+
+The outbound mode defaults to `auto`. You can disable it with
+`PHONEDEX_VOICEMAIL_MODE=off` in your private environment or with the
+`--voicemail-mode off` flag on `phonedex.py dial` or `sip_outbound.py`.
+No chargeable calls are placed by the offline tests.
+
+For GPT Live to **initiate** its first spoken voicemail message reliably,
+provide a private **24-kHz mono PCM16** audio primer, as you would for the
+existing synthetic-greeting mechanism:
+
+``dotenv
+PHONEDEX_VOICEMAIL_MODE=auto
+PHONEDEX_MODEL_WAKE_FILE=path/to/your/private/model-wake.wav
+``
+
+`phonedex.py` and the outbound controller read these variables from
+their configured environment. You can alternatively supply
+`--model-wake-file` for a manual `phonedex.py dial` command.
+This is a model-input wake clip **not** a recording played to the recipient
+and it must not be committed to Git. When voicemail is detected, the live
+session starts with instructions to leave a concise message. Without a wake
+primer, the undocumented GPT Live session may not initiate speech on its own.
+
+**Limitations:** No answering-machine detector is infallible. The heuristic
+may mistake human speech for a voicemail greeting, or miss short/atypical
+beeps. If a suspected machine reaches the 25-second detection limit without
+a convincing beep, PhoneDex ends the call **without talking**. This does not
+guarantee a message was delivered: test with a number and carrier that you
+are authorized to call before relying on it for important messages.
+
 ### Optional AgentPhone call-history transcripts
 
 You can opt in to push **text-only** GPT Live transcripts from completed **inbound**
@@ -210,7 +250,7 @@ From the repository root, install dependencies before running the offline tests:
 
 ```sh
 python phonedex.py doctor
-python -m unittest test_agent_controller test_harness_live_adapter test_sip_teardown test_onboarding test_barge_in test_agentphone_transcripts
+python -m unittest test_agent_controller test_harness_live_adapter test_sip_teardown test_onboarding test_barge_in test_agentphone_transcripts test_voicemail
 node worker/test-agent.mjs
 ```
 
@@ -250,6 +290,7 @@ This command does not place a call. Adding `--place-call` initiates a real SIP c
 - Business tools do not book appointments or deliver lead notifications. The consent-gated lead-storage helper is not wired to live calls yet.
 - Human call transfers, warm handoffs, and GPT Live shutdown after transfer remain planned work.
 - Speech interruption uses a local heuristic cutoff; GPT Live's undocumented subscription transport is not guaranteed to cancel its internal generation.
+- Answering-machine detection is audio-heuristic only; live provider behavior and beep formats vary. When no beep is confirmed, PhoneDex ends the suspected machine call without a message.
 
 The [roadmap and release review](docs/RELEASE_STATUS.md) records current verification and known risks.
 
@@ -258,6 +299,7 @@ The [roadmap and release review](docs/RELEASE_STATUS.md) records current verific
 - [Guided setup and readiness checks](docs/ONBOARDING.md) — interactive local configuration, remote control options, and remaining manual steps.
 - [Technical notes](docs/TECHNICAL_NOTES.md) — media, control, authentication, and data boundaries.
 - [Release status](docs/RELEASE_STATUS.md) — verified behavior, risks, and review guidance.
+- [Preview.6 release notes](docs/RELEASE_NOTES_v0.1.0-preview.6.md) — outbound voicemail greeting/beep screening.
 - [Preview.5 release notes](docs/RELEASE_NOTES_v0.1.0-preview.5.md) — interruption handling, optional AgentPhone transcript export and limitations.
 - [Preview.4 release notes](docs/RELEASE_NOTES_v0.1.0-preview.4.md) — original clean-history source preview.
 - [Security policy](SECURITY.md) — credentials, calling consent, transcripts, and vulnerability reporting.

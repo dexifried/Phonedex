@@ -18,6 +18,12 @@ where needed, honor opt-out requests and do not cold-call indiscriminately.
 Transcripts are stored in Worker KV for a bounded time (24h).
 The Cloudflare Worker does not store raw audio.
 
+**Outbound voicemail detection:** Only for authorized outbound calls. A
+false positive can cause silence toward a person; an unrecognized beep
+causes the call to end without delivering a voicemail. Comply with applicable
+calling, consent, disclosure and telemarketing rules. The detector never
+saves raw audio and does not enable recording.
+
 **Optional AgentPhone transcript sync:** Disabled by default. Enabling
 `PHONEDEX_AGENTPHONE_TRANSCRIPTS_ENABLED` sends text containing possible
 personally identifiable details to a third party (AgentPhone) using the

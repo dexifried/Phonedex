@@ -69,7 +69,8 @@ def dial(opts):
         media_port=int(os.environ.get("PHONEDEX_MEDIA_PORT","41002")),
         to=target,from_number=os.environ["PHONEDEX_CALLER_ID"],
         duration=opts.duration,mode=opts.mode,call_prompt=opts.prompt,
-        model_wake_file=None,greeting_file=None)
+        model_wake_file=opts.model_wake_file or os.environ.get('PHONEDEX_MODEL_WAKE_FILE') or None,
+        voicemail_mode=opts.voicemail_mode,greeting_file=None)
     logging.basicConfig(level=logging.INFO)
     asyncio.run(sip_dial(config))
 
@@ -88,6 +89,11 @@ def main():
     dialing.add_argument("--duration",type=int,default=60)
     dialing.add_argument("--prompt",default="")
     dialing.add_argument("--place-call",action="store_true")
+    dialing.add_argument("--voicemail-mode",choices=("auto","off"),
+        default=os.environ.get("PHONEDEX_VOICEMAIL_MODE","auto"),
+        help="outbound answer screen: stay silent until a voicemail beep")
+    dialing.add_argument("--model-wake-file",default=None,
+        help="local 24-kHz mono PCM16 WAV to prime GPT Live after answer screening")
     args=p.parse_args()
     if args.action=="doctor":doctor()
     elif args.action=="setup":
