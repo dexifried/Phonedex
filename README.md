@@ -22,6 +22,20 @@ PhoneDex connects a SIP telephone call to a GPT Live voice session through a sel
 
 Unlike a typical API-key voice agent, PhoneDex reads a local Codex CLI login and negotiates with a subscription-backed GPT Live endpoint. That endpoint is undocumented and is not the public Realtime API. Access may change or be restricted; you are responsible for confirming that your use is permitted. SIP carrier charges still apply, and PhoneDex has no API-key or paid-inference fallback. PhoneDex is an independent project with no OpenAI, Codex, or AgentPhone endorsement.
 
+### Measured AgentPhone call-credit savings
+
+From actual October 2026 AgentPhone billing transactions, PhoneDex SIP reduced
+**outbound AgentPhone charges by ~90.9%** and **inbound charges by ~98.3%**
+compared with AgentPhone's published $0.22/min hosted-voice rate.
+That works out to about **$1.99 outbound** or **$0.37 inbound** per 100
+call-minutes, versus **$22.00** for hosted voice.
+
+See the [transaction-backed cost comparison](docs/AGENTPHONE_CREDIT_SAVINGS.md)
+for the sample ledger, rate calculations, and a directly comparable 23-second
+hosted-versus-SIP call.
+
+![Bar chart comparing AgentPhone charges per 100 call-minutes: hosted $22, webhook $13, PhoneDex outbound SIP $1.99, and PhoneDex inbound SIP $0.37.](assets/graphs/agentphone-credit-savings.svg)
+
 ## Set up with your coding agent
 
 **Have Codex, Claude Code, Cursor, or another coding agent with terminal access?** Copy this entire prompt into the agent. It can inspect your machine, guide your logins and configure PhoneDex for you instead of making you follow every step manually.
@@ -297,6 +311,7 @@ The [roadmap and release review](docs/RELEASE_STATUS.md) records current verific
 ## Documentation
 
 - [Guided setup and readiness checks](docs/ONBOARDING.md) — interactive local configuration, remote control options, and remaining manual steps.
+- [AgentPhone credit savings](docs/AGENTPHONE_CREDIT_SAVINGS.md) — measured 90.9% outbound and 98.3% inbound AgentPhone charge reductions, with an anonymized transaction ledger.
 - [Technical notes](docs/TECHNICAL_NOTES.md) — media, control, authentication, and data boundaries.
 - [Release status](docs/RELEASE_STATUS.md) — verified behavior, risks, and review guidance.
 - [Preview.6 release notes](docs/RELEASE_NOTES_v0.1.0-preview.6.md) — outbound voicemail greeting/beep screening.

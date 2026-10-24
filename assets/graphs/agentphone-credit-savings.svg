@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc" viewBox="0 0 1200 685" width="1200" height="685">
+  <title id="title">AgentPhone credit charges per 100 call-minutes: hosted, webhook, and PhoneDex SIP</title>
+  <desc id="desc">Hosted voice 22 US dollars, webhook voice 13 US dollars, PhoneDex SIP outbound 1 dollar 99 cents, PhoneDex SIP inbound 37 cents. PhoneDex SIP saves 90.9 percent outbound and 98.3 percent inbound versus hosted voice.</desc>
+  <rect width="1200" height="685" rx="24" fill="#0c1222"/>
+  <rect x="24" y="24" width="1152" height="637" rx="18" fill="#111a2e" stroke="#334155" stroke-width="1"/>
+  <text x="68" y="77" fill="#f8fafc" font-family="Arial, Helvetica, sans-serif" font-size="37" font-weight="700">AgentPhone credits: before vs. PhoneDex</text>
+  <text x="68" y="117" fill="#adbbce" font-family="Arial, Helvetica, sans-serif" font-size="21">USD per 100 call-minutes · actual SIP debits compared with hosted and webhook pricing</text>
+  <g font-family="Arial, Helvetica, sans-serif" font-size="17" fill="#95a5be">
+    <text x="365" y="185" text-anchor="middle">$0</text>
+    <text x="495" y="185" text-anchor="middle">$5</text>
+    <text x="625" y="185" text-anchor="middle">$10</text>
+    <text x="755" y="185" text-anchor="middle">$15</text>
+    <text x="885" y="185" text-anchor="middle">$20</text>
+    <text x="1015" y="185" text-anchor="middle">$25</text>
+  </g>
+  <g stroke="#344058" stroke-width="1" stroke-dasharray="5 8">
+    <line x1="365" y1="201" x2="365" y2="565"/>
+    <line x1="495" y1="201" x2="495" y2="565"/>
+    <line x1="625" y1="201" x2="625" y2="565"/>
+    <line x1="755" y1="201" x2="755" y2="565"/>
+    <line x1="885" y1="201" x2="885" y2="565"/>
+    <line x1="1015" y1="201" x2="1015" y2="565"/>
+  </g>
+  <g font-family="Arial, Helvetica, sans-serif" font-size="23" font-weight="600" fill="#e5eaf3">
+    <text x="68" y="260">Hosted AI</text>
+    <text x="68" y="350">Webhook AI</text>
+    <text x="68" y="440">PhoneDex SIP</text>
+    <text x="68" y="465" font-size="17" font-weight="400" fill="#a0afc8">Outbound</text>
+    <text x="68" y="531">PhoneDex SIP</text>
+    <text x="68" y="556" font-size="17" font-weight="400" fill="#a0afc8">Inbound</text>
+  </g>
+  <rect x="365" y="226" width="572" height="48" rx="9" fill="#8496ae"/>
+  <rect x="365" y="316" width="338" height="48" rx="9" fill="#6891d8"/>
+  <rect x="365" y="406" width="51.74" height="48" rx="9" fill="#2dd4bf"/>
+  <rect x="365" y="496" width="9.62" height="48" rx="4.8" fill="#2dd4bf"/>
+  <g font-family="Arial, Helvetica, sans-serif" font-size="24" font-weight="700">
+    <text x="954" y="258" fill="#f8fafc">$22.00</text>
+    <text x="719" y="348" fill="#f8fafc">$13.00</text>
+    <text x="437" y="438" fill="#58efd5">$1.99</text>
+    <text x="395" y="528" fill="#58efd5">$0.37</text>
+  </g>
+  <line x1="68" y1="591" x2="1132" y2="591" stroke="#344058"/>
+  <text x="68" y="634" fill="#6ee7c6" font-family="Arial, Helvetica, sans-serif" font-size="23" font-weight="700">90.9% lower outbound</text>
+  <text x="414" y="634" fill="#6ee7c6" font-family="Arial, Helvetica, sans-serif" font-size="23" font-weight="700">98.3% lower inbound</text>
+  <text x="1116" y="636" text-anchor="end" fill="#9aa9be" font-family="Arial, Helvetica, sans-serif" font-size="17">PhoneDex · October 2026</text>
+</svg>
