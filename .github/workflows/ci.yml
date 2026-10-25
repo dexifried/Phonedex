@@ -22,7 +22,9 @@ jobs:
       - name: Read-only bootstrap preflight
         run: python scripts/bootstrap.py --check
       - name: Offline Python tests
-        run: python -m unittest test_bootstrap test_inbound_abuse_guard test_agent_controller test_harness_live_adapter test_sip_teardown test_onboarding test_barge_in test_agentphone_transcripts test_voicemail test_transcript_privacy test_jev_shadow
+        run: python -m unittest test_bootstrap test_inbound_abuse_guard test_agent_controller test_harness_live_adapter test_sip_teardown test_onboarding test_barge_in test_agentphone_transcripts test_voicemail test_transcript_privacy test_jev_shadow test_shadow_decisions
+      - name: Shadow engine CPU benchmark (synthetic development fixtures)
+        run: python scripts/bench_shadow.py --backends rules
       - name: Release secret and file audit
         run: python scripts/release_audit.py
 
