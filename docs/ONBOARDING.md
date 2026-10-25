@@ -102,9 +102,13 @@ are separately controlled steps.
 4. **Private credential storage:** Move SIP credentials and Worker gateway
    secrets from plaintext `.env` to an OS-specific credential vault, retaining
    an explicit export/migration path.
-5. **Package distribution:** Signed releases or installer binaries for Windows,
+5. **Linux compatibility:** Validate setup, native audio/SRTP dependencies,
+   Codex authentication, SIP/RTP, and optional `systemd` deployment on a clean
+   Linux host, with Linux CI coverage and a separately authorized carrier test.
+   Track progress in [ROADMAP.md](ROADMAP.md).
+6. **Package distribution:** Signed releases or installer binaries for Windows,
    Linux and macOS, with a tested update/uninstall workflow.
-6. **First-call verification:** Show model/SIP readiness, call progress, hangup
+7. **First-call verification:** Show model/SIP readiness, call progress, hangup
    completion and estimated telecom billing, without revealing caller data.
 
 Do not claim one-click installation, automatic compatibility with every SIP

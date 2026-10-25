@@ -357,6 +357,12 @@ This command does not place a call. Adding `--place-call` initiates a real SIP c
 
 ## Limitations and roadmap
 
+**Linux compatibility is a planned milestone**, including reproducible installation
+on a clean Linux host, dependency verification, `systemd` service setup, SIP/RTP
+testing and Linux CI. See the [project roadmap](docs/ROADMAP.md) for acceptance
+criteria and status; this has not yet been verified end-to-end.
+
+
 - One outbound call at a time; no complete SIP transaction stack, broad fuzzing, production security audit, or commercial SLA.
 - Generic Linux/macOS installation and arbitrary carrier compatibility are unverified. The current release notes record offline Windows validation; that is not a carrier compatibility guarantee.
 - Inbound media requires SRTP even when SIP signaling itself uses TLS. PhoneDex will reject plain RTP rather than silently downgrade audio privacy.
