@@ -12,7 +12,7 @@ CID = "call_" + "b" * 32
 
 class VaultTests(unittest.TestCase):
     def test_vault_path_uses_per_user_roaming_profile(self):
-        with patch.dict(os.environ, {"APPDATA": r"C:\Users\Example\AppData\Roaming"}):
+        with patch.dict(os.environ, {"APPDATA": "synthetic_roaming"}):
             path = vault.vault_path()
             self.assertEqual(path.name, "provider-key.dpapi")
             self.assertEqual(path.parent.name, "JevResearch")
