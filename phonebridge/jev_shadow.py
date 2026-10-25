@@ -146,7 +146,7 @@ class JevShadowObserver:
                     api_key = load_jev_research_key_locally()
                 if not api_key:
                     raise ValueError("Missing TYPESAFE_API_KEY or opt-in local DPAPI vault")
-                model = os.environ.get("PHONEDEX_JEV_SHADOW_MODEL") or "jev-latest"
+                model = os.environ.get("PHONEDEX_JEV_SHADOW_MODEL") or "jev-1.14.0"
             else:
                 url, api_key, model = "", "", "rules"
             root = Path(os.environ.get("PHONEDEX_DATA_DIR") or
