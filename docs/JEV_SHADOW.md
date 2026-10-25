@@ -39,6 +39,23 @@ your process environment. The HTTPS endpoint is fixed at
 `https://api.typesafe.ai/v1/systemone`, model `jev-latest` by default.
 PhoneDex never includes a shared TypeSafe key.
 
+If you previously saved the key through JevResearch's Windows DPAPI
+vault, you can reuse it **without copying or displaying the key**:
+
+    PHONEDEX_JEV_SHADOW_ENABLED=1
+    PHONEDEX_JEV_SHADOW_BACKEND=jev
+    PHONEDEX_JEV_USE_JEVRESEARCH_VAULT=1
+
+PhoneDex will attempt to decrypt
+`%APPDATA%\JevResearch\provider-key.dpapi` only inside the locally
+running process under the **same Windows user** who originally saved it.
+This is OFF by default; `TYPESAFE_API_KEY` or
+`PHONEDEX_JEV_SHADOW_API_KEY` takes priority when already supplied.
+It does not call the remote PC connector to read the vault and never
+prints or writes the recovered secret. Unlock failure disables the
+observer rather than interrupting a phone call. Presence of the file
+does not prove a valid TypeSafe subscription or network access.
+
 For local Kev:
 
     PHONEDEX_JEV_SHADOW_BACKEND=kev
