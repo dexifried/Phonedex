@@ -18,8 +18,10 @@ Use a dedicated self-hosted Linux test environment to bring the existing
 Python SIP/TLS, SRTP/WebRTC, and GPT Live bridge to Linux without relying
 on Windows-specific launchers or local assumptions.
 
-- [ ] Test from a clean supported Linux distribution, starting with a documented
-      Debian/Ubuntu baseline and recording actual Python/CPU architecture support.
+- [ ] Start validation on an existing **EndeavourOS (Arch Linux-based)**
+      test host, documenting the actual OS version, Python version and CPU
+      architecture. Reproduce setup on a clean Arch-based installation before
+      claiming compatibility.
 - [ ] Verify native dependencies (`aiortc`, `av`, `pylibsrtp`, and codecs),
       Codex CLI authentication, file permissions and project-local virtualenv setup.
 - [ ] Replace any Windows-only service management, credential-loading or path
