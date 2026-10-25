@@ -431,6 +431,6 @@ The subscription-backed GPT Live endpoint is undocumented, can change or become 
 An opt-in, advisory-only Jev observer can independently analyze the entire
 caller/assistant transcript for goals, missing answers, handoff requests, and
 final outcomes, without entering the live audio path. Disabled by default;
-requires a separately configured Jev endpoint. See [Jev shadow setup and
+supports hosted TypeSafe Jev, local Kev-4B/0.8B or CPU-only rules. See [Jev shadow setup and
 privacy](docs/JEV_SHADOW.md). No transfer, retry, or hangup actions are
 automatically executed by the observer.
