@@ -20,7 +20,7 @@ LOG = logging.getLogger("phonedex.jev-shadow")
 CALL_ID = re.compile(r"^call_[a-f0-9]{32}$")
 TYPES = {"session.input_transcript.delta": "caller",
          "session.output_transcript.delta": "assistant"}
-STATES = {"unknown", "ringing", "speaking", "voicemail", "hold", "ivr", "completed", "interrupted"}
+STATES = {"unknown", "ringing", "speaking", "voicemail", "hold", "ivr", "closing", "completed", "interrupted"}
 ACTIONS = {"none", "continue", "wrap_up", "retry_later", "handoff"}
 SYSTEM = (
     "You are Jev, an independent, silent PhoneDex call observer. Read the entire "
@@ -68,6 +68,8 @@ def validated_result(value: object) -> dict:
         "handoff_requested": value.get("handoff_requested") is True,
         "recommendation": action,
         "summary": str(value.get("summary") or "")[:2000],
+        "engine": value.get("engine") if value.get("engine") in ("rules", "jev", "kev") else "unknown",
+        "decisions": value.get("decisions") if isinstance(value.get("decisions"), dict) else {},
     }
 
 
