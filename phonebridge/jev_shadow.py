@@ -14,6 +14,7 @@ import re
 import time
 from urllib.parse import urlsplit
 from urllib.request import Request, HTTPRedirectHandler, build_opener
+from phonebridge.shadow_decisions import run_backend
 
 LOG = logging.getLogger("phonedex.jev-shadow")
 CALL_ID = re.compile(r"^call_[a-f0-9]{32}$")
@@ -37,8 +38,8 @@ SYSTEM = (
 def validated_url(url: str, allow_remote: bool = False) -> str:
     parsed = urlsplit(url)
     if (not parsed.hostname or parsed.username or parsed.password or
-            parsed.query or parsed.fragment or not parsed.path.endswith("/chat/completions")):
-        raise ValueError("Expected Jev OpenAI-compatible chat/completions URL without embedded credentials")
+            parsed.query or parsed.fragment or not parsed.path.endswith("/v1/systemone")):
+        raise ValueError("Expected local Kev /v1/systemone URL without embedded credentials")
     local = parsed.hostname in {"localhost", "127.0.0.1", "::1"}
     if (local and parsed.scheme in ("http", "https")) or (allow_remote and parsed.scheme == "https"):
         return url
@@ -91,7 +92,8 @@ class CallEventFanout:
 class JevShadowObserver:
     """One in-memory observer for one call; full-context snapshots for each check."""
 
-    def __init__(self, call_id: str, goal: str, *, url: str, model: str = "jev",
+    def __init__(self, call_id: str, goal: str, *, url: str = "", model: str = "kev-latest",
+                 backend: str = "rules",
                  interval: float = 6.0, timeout: float = 5.0,
                  api_key: str = "", data_dir: Path | None = None):
         if not CALL_ID.fullmatch(call_id):
@@ -100,6 +102,7 @@ class JevShadowObserver:
         self.goal = goal[:3000]
         self.url = url
         self.model = model
+        self.backend = backend
         self.interval = max(1.0, min(float(interval), 30.0))
         self.timeout = max(1.0, min(float(timeout), 10.0))
         self.api_key = api_key
@@ -122,15 +125,30 @@ class JevShadowObserver:
         if os.environ.get("PHONEDEX_JEV_SHADOW_ENABLED") != "1":
             return None
         try:
-            url = validated_url(os.environ.get("PHONEDEX_JEV_SHADOW_URL", ""),
-                                os.environ.get("PHONEDEX_JEV_SHADOW_ALLOW_REMOTE") == "1")
+            backend = os.environ.get("PHONEDEX_JEV_SHADOW_BACKEND", "rules").strip().lower()
+            if backend not in ("rules", "kev", "jev"):
+                raise ValueError("Invalid Jev shadow backend")
+            if backend == "kev":
+                url = validated_url(os.environ.get("PHONEDEX_JEV_SHADOW_URL", ""),
+                                    os.environ.get("PHONEDEX_JEV_SHADOW_ALLOW_REMOTE") == "1")
+                api_key = os.environ.get("PHONEDEX_JEV_SHADOW_API_KEY", "")
+                model = os.environ.get("PHONEDEX_JEV_SHADOW_MODEL") or "kev-latest"
+            elif backend == "jev":
+                url = "https://api.typesafe.ai/v1/systemone"
+                api_key = os.environ.get("TYPESAFE_API_KEY") or os.environ.get(
+                    "PHONEDEX_JEV_SHADOW_API_KEY", "")
+                if not api_key:
+                    raise ValueError("Missing TYPESAFE_API_KEY")
+                model = os.environ.get("PHONEDEX_JEV_SHADOW_MODEL") or "jev-latest"
+            else:
+                url, api_key, model = "", "", "rules"
             root = Path(os.environ.get("PHONEDEX_DATA_DIR") or
                         str(Path.home() / ".phonedex")).expanduser()
-            return cls(call_id, goal, url=url,
-                       model=os.environ.get("PHONEDEX_JEV_SHADOW_MODEL") or "jev",
+            return cls(call_id, goal, url=url, backend=backend,
+                       model=model,
                        interval=float(os.environ.get("PHONEDEX_JEV_SHADOW_INTERVAL", "6")),
                        timeout=float(os.environ.get("PHONEDEX_JEV_SHADOW_TIMEOUT", "5")),
-                       api_key=os.environ.get("PHONEDEX_JEV_SHADOW_API_KEY", ""),
+                       api_key=api_key,
                        data_dir=root / "jev-shadow")
         except (ValueError, OverflowError) as exc:
             LOG.warning("Jev shadow unavailable: %s", type(exc).__name__)
@@ -163,29 +181,9 @@ class JevShadowObserver:
         self._changed.set()
 
     def _request(self, transcript: list[dict], final: bool) -> dict:
-        data = json.dumps({
-            "model": self.model, "stream": False, "temperature": 0,
-            "messages": [
-                {"role": "system", "content": SYSTEM},
-                {"role": "user", "content": json.dumps(
-                    {"goal": self.goal, "final_audit": final, "dialogue": transcript},
-                    ensure_ascii=False)}
-            ]}, ensure_ascii=False).encode("utf-8")
-        headers = {"Content-Type": "application/json"}
-        if self.api_key:
-            headers["Authorization"] = "Bearer " + self.api_key
-        request = Request(self.url, data=data, headers=headers, method="POST")
-        with build_opener(_NoRedirect()).open(request, timeout=self.timeout) as response:
-            body = response.read(256001)
-        if len(body) > 256000:
-            raise ValueError("Oversized Jev response")
-        answer = json.loads(body)["choices"][0]["message"]["content"]
-        if not isinstance(answer, str):
-            raise ValueError("No Jev answer")
-        answer = answer.strip()
-        if answer.startswith(chr(96) * 3):
-            answer = answer.split("\n", 1)[-1].rsplit(chr(96) * 3, 1)[0].strip()
-        return validated_result(json.loads(answer))
+        return validated_result(run_backend(
+            transcript, self.goal, final, backend=self.backend, url=self.url,
+            model=self.model, api_key=self.api_key, timeout=self.timeout))
 
     async def _analyze(self, final: bool) -> None:
         if not self.events or self.overflow:
