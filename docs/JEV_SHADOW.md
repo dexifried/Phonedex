@@ -36,7 +36,7 @@ transcribed and evaluated. For all backends:
 
 For hosted Jev set `PHONEDEX_JEV_SHADOW_BACKEND=jev` and `TYPESAFE_API_KEY` in
 your process environment. The HTTPS endpoint is fixed at
-`https://api.typesafe.ai/v1/systemone`, model `jev-latest` by default.
+`https://api.typesafe.ai/v1/systemone`, model `jev-1.14.0` by default (the version used in the first real API benchmark).
 PhoneDex never includes a shared TypeSafe key.
 
 If you previously saved the key through JevResearch's Windows DPAPI
@@ -121,6 +121,11 @@ Run deterministic baseline with synthetic labeled development cases:
 Run all three only after explicitly configuring Jev credentials and Kev:
 
     python scripts/bench_shadow.py --backends rules,kev,jev --output results.json
+
+If you use the existing Windows-user vault rather than an environment key,
+run (only when you explicitly intend to pay for hosted requests):
+
+    python scripts/bench_shadow.py --backends rules,jev --use-jevresearch-vault --output results.json
 
 The harness reports per-question correct / incorrect / abstained, coverage,
 and request latency p50/p95. It uses identical cases for every backend.
