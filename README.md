@@ -355,6 +355,15 @@ This command does not place a call. Adding `--place-call` initiates a real SIP c
 | A transcript is delayed or missing | For the Worker, check gateway connectivity, token and KV consistency. For optional AgentPhone exports, check the three `PHONEDEX_AGENTPHONE_*` environment variables, the inbound caller ID and completed provider record; the exporter refuses ambiguous matches and stores no local plaintext retry spool. |
 | You need current command options | Run `python phonedex.py --help`, `python phonedex.py dial --help`, or `python sip_tls_gateway.py --help`. |
 
+## SIP abuse and resilience protection
+
+Inbound SIP calls have basic in-memory protection against rapid repeated
+hangups (three short calls within 90 seconds trigger a 60-second cooldown),
+INVITE replay, and extreme call bursts. Cooldown calls are rejected before
+GPT Live starts, using standard SIP `Retry-After` signaling—not a
+prerecorded audio announcement. See [SIP hardening](docs/SIP_HARDENING.md)
+for thresholds, privacy considerations and limitations.
+
 ## Limitations and roadmap
 
 **Linux compatibility is a planned milestone**, including reproducible installation
