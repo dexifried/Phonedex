@@ -20,7 +20,7 @@ def load_config():
             value=value[1:-1]
         if value:os.environ.setdefault(key,value)
 
-def doctor():
+def doctor(mode='local'):
     from phonebridge.subscription_live import oauth_check
     from harness.transcript_store import transcript_mode, retention_days
     missing_deps=[p for p in ("aiortc","av","pylibsrtp","websockets") if importlib.util.find_spec(p) is None]
@@ -28,8 +28,11 @@ def doctor():
     print("PROJECT=Phonedex;BY=Dexifyz")
     print(oauth_check())
     required=["PHONEDEX_TERMINATION_URI","PHONEDEX_PUBLIC_IP","PHONEDEX_CALLER_ID",
-              "PHONEDEX_SIP_USERNAME","PHONEDEX_SIP_PASSWORD","PHONEDEX_GATEWAY_URL",
-              "PHONEDEX_GATEWAY_TOKEN"]
+              "PHONEDEX_SIP_USERNAME","PHONEDEX_SIP_PASSWORD"]
+    if mode == "remote":
+        required += ["PHONEDEX_GATEWAY_URL","PHONEDEX_GATEWAY_TOKEN"]
+    print("CHECK_MODE="+mode)
+    print("CLOUDFLARE_CONTROL="+("required" if mode=="remote" else "optional"))
     missing=[name for name in required if not os.environ.get(name)]
     print("CONFIG_MISSING="+(",".join(missing) if missing else "none"))
     try:
@@ -88,7 +91,9 @@ def main():
     load_config()
     p=argparse.ArgumentParser(description=__doc__)
     sub=p.add_subparsers(dest="action",required=True)
-    sub.add_parser("doctor",help="Report readiness without showing any credential")
+    doc=sub.add_parser("doctor",help="Report readiness without showing any credential")
+    doc.add_argument("--mode",choices=("local","remote"),default="local",
+                     help="check local SIP calling (default) or remote Worker control")
     setup=sub.add_parser("setup",help="Guided, offline configuration; no calls or deployment")
     setup.add_argument("--mode",choices=("local","remote"),default="local",help="local SIP calling or remote Worker control")
     setup.add_argument("--check",action="store_true",help="Read-only readiness checklist; safe for automation")
@@ -105,7 +110,7 @@ def main():
     dialing.add_argument("--model-wake-file",default=None,
         help="local 24-kHz mono PCM16 WAV to prime GPT Live after answer screening")
     args=p.parse_args()
-    if args.action=="doctor":doctor()
+    if args.action=="doctor":doctor(args.mode)
     elif args.action=="setup":
         from onboarding import print_readiness,run_setup
         if args.check:print_readiness(args.mode)

@@ -36,6 +36,44 @@ hosted-versus-SIP call.
 
 ![Bar chart comparing AgentPhone charges per 100 call-minutes: hosted $22, webhook $13, PhoneDex outbound SIP $1.99, and PhoneDex inbound SIP $0.37.](assets/graphs/agentphone-credit-savings.svg)
 
+## First five minutes: local quickstart
+
+**Start here** if you want to try PhoneDex. This prepares an isolated Python
+environment; it does **not** register a phone number, place calls, configure your
+router or create any Cloudflare resources.
+
+```sh
+git clone https://github.com/dexifried/Phonedex.git
+cd Phonedex
+python scripts/bootstrap.py
+```
+
+The bootstrap asks permission before creating `.venv` and installing its
+dependencies. It never installs globally, overwrites `.env`, or touches SIP
+settings. Need to inspect first? Run `python scripts/bootstrap.py --check`
+(read-only), even if optional packages aren't installed.
+
+Next, sign into the Codex CLI using `codex login` and run the project-local
+Python interpreter that bootstrap prints:
+
+- **Windows:** `.venv\Scripts\python.exe phonedex.py setup --check`
+- **macOS/Linux:** `.venv/bin/python phonedex.py setup --check`
+
+Then run `phonedex.py setup` using that same interpreter to enter your own SIP
+provider details privately. This is an **outbound local setup**:
+Cloudflare/Node/Wrangler aren't needed. No calls are made until you explicitly
+use `dial --place-call` with an allowlisted number.
+
+> You'll still need access to a compatible SIP provider, your provider's
+> termination credentials and approved caller ID, and working UDP media
+> connectivity for a real call. This is not a provider-free demo or
+> one-click phone-number provisioning.
+
+**Have a problem?** The short [first-run checklist](docs/FIRST_RUN.md) separates
+local preparation, Codex authentication, SIP configuration and the first
+authorized call. Share only the sanitized `setup --check` output when
+asking for help—**never** credentials, full `.env`, or auth files.
+
 ## Set up with your coding agent
 
 **Have Codex, Claude Code, Cursor, or another coding agent with terminal access?** Copy this entire prompt into the agent. It can inspect your machine, guide your logins and configure PhoneDex for you instead of making you follow every step manually.
@@ -161,15 +199,19 @@ From a terminal:
 ```sh
 git clone https://github.com/dexifried/Phonedex.git
 cd Phonedex
-python -m pip install -r requirements.txt
+python scripts/bootstrap.py
 codex login
 ```
 
 **Recommended:** use the guided setup wizard. It runs locally, does not place phone calls or deploy anything, and refuses to overwrite an existing `.env`:
 
 ```sh
-python phonedex.py setup --check
-python phonedex.py setup
+# Use the .venv Python printed by bootstrap. Windows:
+.venv\Scripts\python.exe phonedex.py setup --check
+.venv\Scripts\python.exe phonedex.py setup
+
+# On macOS/Linux, replace .venv\Scripts\python.exe
+# with .venv/bin/python.
 ```
 
 For manual setup **instead**, copy the example configuration to a private local file:
@@ -221,7 +263,7 @@ For GPT Live to **initiate** its first spoken voicemail message reliably,
 provide a private **24-kHz mono PCM16** audio primer, as you would for the
 existing synthetic-greeting mechanism:
 
-``dotenv
+```dotenv
 PHONEDEX_VOICEMAIL_MODE=auto
 PHONEDEX_MODEL_WAKE_FILE=path/to/your/private/model-wake.wav
 ``
@@ -250,7 +292,7 @@ feature or local recording files are included.
 
 In your **private** environment (not in committed source), set:
 
-``dotenv
+```dotenv
 PHONEDEX_AGENTPHONE_TRANSCRIPTS_ENABLED=1
 PHONEDEX_AGENTPHONE_API_KEY=your-private-agentphone-api-key
 PHONEDEX_AGENTPHONE_NUMBER_ID=your-own-agentphone-number-id
@@ -279,8 +321,9 @@ by law and confirm that sending speech to AgentPhone is appropriate.
 From the repository root, install dependencies before running the offline tests:
 
 ```sh
-python phonedex.py doctor
-python -m unittest test_agent_controller test_harness_live_adapter test_sip_teardown test_onboarding test_barge_in test_agentphone_transcripts test_voicemail
+python phonedex.py doctor --mode local
+python -m unittest test_bootstrap test_agent_controller test_harness_live_adapter test_sip_teardown test_onboarding test_barge_in test_agentphone_transcripts test_voicemail test_transcript_privacy
+# Optional: only if you plan to deploy remote Worker control:
 node worker/test-agent.mjs
 ```
 
