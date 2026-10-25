@@ -28,26 +28,28 @@ class SettingsTests(unittest.TestCase):
             self.assertIsNone(JevShadowObserver.from_env(ID, "Ask a question"))
 
     def test_requires_local_endpoint_by_default(self):
-        for address in ("http://attacker.example/v1/chat/completions",
-                        "http://localhost.evil/v1/chat/completions",
-                        "https://user:pass@localhost/v1/chat/completions",
+        for address in ("http://attacker.example/v1/systemone",
+                        "http://localhost.evil/v1/systemone",
+                        "https://user:pass@localhost/v1/systemone",
                         "file:///tmp/secret", "http://127.0.0.1/v1/other"):
             with self.subTest(address=address), self.assertRaises(ValueError):
                 validated_url(address)
         self.assertEqual(
-            validated_url("http://127.0.0.1:1234/v1/chat/completions"),
-            "http://127.0.0.1:1234/v1/chat/completions")
+            validated_url("http://127.0.0.1:1234/v1/systemone"),
+            "http://127.0.0.1:1234/v1/systemone")
 
     def test_explicit_opt_in_and_separate_privacy_setting(self):
         with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {
             "PHONEDEX_JEV_SHADOW_ENABLED": "1",
-            "PHONEDEX_JEV_SHADOW_URL": "http://localhost:1234/v1/chat/completions",
+            "PHONEDEX_JEV_SHADOW_URL": "http://localhost:1234/v1/systemone",
             "PHONEDEX_TRANSCRIPT_MODE": "off",
+            "PHONEDEX_JEV_SHADOW_BACKEND": "kev",
             "PHONEDEX_DATA_DIR": temp,
         }, clear=True):
             observer = JevShadowObserver.from_env(ID, "Get a quote")
             self.assertIsNotNone(observer)
             self.assertEqual(observer.goal, "Get a quote")
+            self.assertEqual(observer.backend, "kev")
             self.assertEqual(observer.data_dir, Path(temp) / "jev-shadow")
 
     def test_output_is_validated_and_actions_are_advisory(self):
@@ -61,7 +63,7 @@ class ObserverTests(unittest.IsolatedAsyncioTestCase):
     async def test_full_context_replayed_then_final_report_saved(self):
         with tempfile.TemporaryDirectory() as temp:
             monitor = JevShadowObserver(
-                ID, "Ask for the price", url="http://localhost/v1/chat/completions",
+                ID, "Ask for the price", url="http://localhost/v1/systemone",
                 data_dir=Path(temp))
             snapshots = []
 
@@ -94,7 +96,7 @@ class ObserverTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn("How much?", json.dumps(persisted))
 
     async def test_dedup_does_not_depend_on_transcript_storage(self):
-        monitor = JevShadowObserver(ID, "Goal", url="http://localhost/v1/chat/completions")
+        monitor = JevShadowObserver(ID, "Goal", url="http://localhost/v1/systemone")
         event = {"type": "session.input_transcript.delta", "event_id": "e1", "delta": "Hello"}
         monitor.on_live_event(event)
         monitor.on_live_event(event)
@@ -108,7 +110,7 @@ class ObserverTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(monitor.events), 2)
 
     async def test_failure_is_not_reported_as_success(self):
-        monitor = JevShadowObserver(ID, "Goal", url="http://localhost/v1/chat/completions")
+        monitor = JevShadowObserver(ID, "Goal", url="http://localhost/v1/systemone")
         monitor.on_live_event({"type": "session.input_transcript.delta", "delta": "Hi"})
         with patch.object(monitor, "_request", side_effect=TimeoutError("unavailable")):
             result = await monitor.finish()
@@ -116,7 +118,7 @@ class ObserverTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["observer_error"], "TimeoutError")
 
     async def test_failed_final_audit_cannot_reuse_old_success(self):
-        observer = JevShadowObserver(ID, "Goal", url="http://localhost/v1/chat/completions")
+        observer = JevShadowObserver(ID, "Goal", url="http://localhost/v1/systemone")
         observer.on_live_event({"type": "session.input_transcript.delta", "delta": "Hi"})
         with patch.object(observer, "_request", return_value=validated_result(ANSWER)):
             await observer._analyze(False)
@@ -134,8 +136,9 @@ class ObserverTests(unittest.IsolatedAsyncioTestCase):
 
         with patch.dict(os.environ, {
             "PHONEDEX_JEV_SHADOW_ENABLED": "1",
-            "PHONEDEX_JEV_SHADOW_URL": "http://localhost/v1/chat/completions",
-            "PHONEDEX_TRANSCRIPT_MODE": "off"
+            "PHONEDEX_JEV_SHADOW_URL": "http://localhost/v1/systemone",
+            "PHONEDEX_TRANSCRIPT_MODE": "off",
+            "PHONEDEX_JEV_SHADOW_BACKEND": "kev"
         }, clear=True):
             call = CallControl(FakeGateway(), {
                 "call_id": ID, "mode": "normal", "prompt": "Ask for price"})
