@@ -70,6 +70,17 @@ def validated_result(value: object) -> dict:
     }
 
 
+class CallEventFanout:
+    """Forward the same normalized event to transcript capture and Jev."""
+
+    def __init__(self, *receivers):
+        self.receivers = tuple(receiver for receiver in receivers if receiver is not None)
+
+    def on_live_event(self, event: dict) -> None:
+        for receiver in self.receivers:
+            receiver.on_live_event(event)
+
+
 class JevShadowObserver:
     """One in-memory observer for one call; full-context snapshots for each check."""
 
