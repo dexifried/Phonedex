@@ -36,6 +36,44 @@ hosted-versus-SIP call.
 
 ![Bar chart comparing AgentPhone charges per 100 call-minutes: hosted $22, webhook $13, PhoneDex outbound SIP $1.99, and PhoneDex inbound SIP $0.37.](assets/graphs/agentphone-credit-savings.svg)
 
+## First five minutes: local quickstart
+
+**Start here** if you want to try PhoneDex. This prepares an isolated Python
+environment; it does **not** register a phone number, place calls, configure your
+router or create any Cloudflare resources.
+
+```sh
+git clone https://github.com/dexifried/Phonedex.git
+cd Phonedex
+python scripts/bootstrap.py
+```
+
+The bootstrap asks permission before creating `.venv` and installing its
+dependencies. It never installs globally, overwrites `.env`, or touches SIP
+settings. Need to inspect first? Run `python scripts/bootstrap.py --check`
+(read-only), even if optional packages aren't installed.
+
+Next, sign into the Codex CLI using `codex login` and run the project-local
+Python interpreter that bootstrap prints:
+
+- **Windows:** `.venv\Scripts\python.exe phonedex.py setup --check`
+- **macOS/Linux:** `.venv/bin/python phonedex.py setup --check`
+
+Then run `phonedex.py setup` using that same interpreter to enter your own SIP
+provider details privately. This is an **outbound local setup**:
+Cloudflare/Node/Wrangler aren't needed. No calls are made until you explicitly
+use `dial --place-call` with an allowlisted number.
+
+> You'll still need access to a compatible SIP provider, your provider's
+> termination credentials and approved caller ID, and working UDP media
+> connectivity for a real call. This is not a provider-free demo or
+> one-click phone-number provisioning.
+
+**Have a problem?** The short [first-run checklist](docs/FIRST_RUN.md) separates
+local preparation, Codex authentication, SIP configuration and the first
+authorized call. Share only the sanitized `setup --check` output when
+asking for help—**never** credentials, full `.env`, or auth files.
+
 ## Set up with your coding agent
 
 **Have Codex, Claude Code, Cursor, or another coding agent with terminal access?** Copy this entire prompt into the agent. It can inspect your machine, guide your logins and configure PhoneDex for you instead of making you follow every step manually.
@@ -96,7 +134,8 @@ Do not claim success until the relevant checks actually pass.
 - Optional Worker control routes for dispatch, status, transcripts, private steering, command acknowledgements, and hangup.
 - Normal and business prompt modes. Business mode can read a local profile and a read-only calendar snapshot. It does not book appointments or send messages.
 - Default-deny outbound recipient allowlisting, per-day call limits, a one-call concurrency limit, and separate operator and gateway bearer secrets.
-- Transcript normalization, duplicate suppression across event sources, and retries for failed Worker transcript uploads.
+- **Privacy-controlled transcripts:** choose `off` (default), `local`, `worker`, or `both`. Local SQLite keeps conversation text on your own machine; Worker/KV transcript export is explicitly opt-in. Remote call control continues to work without transcript upload.
+- Transcript normalization, duplicate suppression across event sources, and retries for failed Worker transcript uploads when enabled.
 - Optional **AgentPhone Calls dashboard transcript sync** for inbound calls, using the caller number and timestamp to match exactly one completed provider record. Disabled unless explicitly configured.
 
 ### Experimental or not verified
@@ -124,7 +163,22 @@ Human transfer is **not implemented**. The [handoff document](docs/CALL_HANDOFF_
   <img src="assets/branding/architecture.svg" alt="Phone carrier audio flows through the PhoneDex SIP/TLS gateway, RTP bridge, and GPT Live. Remote call control flows through Cloudflare Worker and KV to the local controller." width="100%">
 </p>
 
-The Worker handles call instructions and text metadata. It does not receive raw audio or SIP credentials. Transcript text may be stored in KV for up to 24 hours.
+The Worker handles call instructions and text metadata. It does not receive raw audio or SIP credentials. **Transcript text is not sent to Workers KV by default**; `PHONEDEX_TRANSCRIPT_MODE=worker` or `both` enables it. Phone numbers, dial prompts, status and command metadata still go to the Worker when remote control is used.
+
+### Self-hosted transcript privacy
+
+PhoneDex makes conversation-text retention an explicit choice:
+
+| `PHONEDEX_TRANSCRIPT_MODE` | Save transcripts locally | Send transcripts to Workers KV |
+| --- | --- | --- |
+| `off` (default) | No | No |
+| `local` | Yes, SQLite | No |
+| `worker` | No | Yes |
+| `both` | Yes | Yes |
+
+In `local` mode, inbound and outbound GPT Live text is written under `PHONEDEX_DATA_DIR` (default `~/.phonedex/transcripts.sqlite3`) and can be listed or deleted locally. Configurable retention defaults to 7 days; expired records are pruned on writes or manual cleanup. **The local database is plaintext**, so protect your machine and backups.
+
+The optional AgentPhone Calls dashboard export is independently disabled by default. This does not hide call media from the SIP provider or GPT Live: both still process the call. See [Transcript privacy and local storage](docs/TRANSCRIPT_PRIVACY.md) for exact data boundaries, security limitations and deletion commands.
 
 ## Quickstart
 
@@ -134,7 +188,7 @@ The Worker handles call instructions and text metadata. It does not receive raw 
 - Codex CLI logged into a ChatGPT account that can access the required session.
 - A SIP provider configured for TLS signaling, PCMU, and SDES-SRTP. Public inbound use also needs a trusted certificate, source-IP allowlisting, and reachable UDP media port.
 - Node.js for the Worker tests and Wrangler CLI. Use a currently supported Node.js release for Wrangler.
-- A Cloudflare account and Workers KV namespace only if you want remote agent controls.
+- A Cloudflare account and Workers KV namespace only if you want remote agent controls. Remote transcript uploads are disabled by default.
 
 PhoneDex has not been verified across arbitrary SIP providers. A dry run and the offline test suites do not make a real call.
 
@@ -145,15 +199,19 @@ From a terminal:
 ```sh
 git clone https://github.com/dexifried/Phonedex.git
 cd Phonedex
-python -m pip install -r requirements.txt
+python scripts/bootstrap.py
 codex login
 ```
 
 **Recommended:** use the guided setup wizard. It runs locally, does not place phone calls or deploy anything, and refuses to overwrite an existing `.env`:
 
 ```sh
-python phonedex.py setup --check
-python phonedex.py setup
+# Use the .venv Python printed by bootstrap. Windows:
+.venv\Scripts\python.exe phonedex.py setup --check
+.venv\Scripts\python.exe phonedex.py setup
+
+# On macOS/Linux, replace .venv\Scripts\python.exe
+# with .venv/bin/python.
 ```
 
 For manual setup **instead**, copy the example configuration to a private local file:
@@ -205,7 +263,7 @@ For GPT Live to **initiate** its first spoken voicemail message reliably,
 provide a private **24-kHz mono PCM16** audio primer, as you would for the
 existing synthetic-greeting mechanism:
 
-``dotenv
+```dotenv
 PHONEDEX_VOICEMAIL_MODE=auto
 PHONEDEX_MODEL_WAKE_FILE=path/to/your/private/model-wake.wav
 ``
@@ -234,7 +292,7 @@ feature or local recording files are included.
 
 In your **private** environment (not in committed source), set:
 
-``dotenv
+```dotenv
 PHONEDEX_AGENTPHONE_TRANSCRIPTS_ENABLED=1
 PHONEDEX_AGENTPHONE_API_KEY=your-private-agentphone-api-key
 PHONEDEX_AGENTPHONE_NUMBER_ID=your-own-agentphone-number-id
@@ -263,8 +321,9 @@ by law and confirm that sending speech to AgentPhone is appropriate.
 From the repository root, install dependencies before running the offline tests:
 
 ```sh
-python phonedex.py doctor
-python -m unittest test_agent_controller test_harness_live_adapter test_sip_teardown test_onboarding test_barge_in test_agentphone_transcripts test_voicemail
+python phonedex.py doctor --mode local
+python -m unittest test_bootstrap test_agent_controller test_harness_live_adapter test_sip_teardown test_onboarding test_barge_in test_agentphone_transcripts test_voicemail test_transcript_privacy
+# Optional: only if you plan to deploy remote Worker control:
 node worker/test-agent.mjs
 ```
 
@@ -296,7 +355,22 @@ This command does not place a call. Adding `--place-call` initiates a real SIP c
 | A transcript is delayed or missing | For the Worker, check gateway connectivity, token and KV consistency. For optional AgentPhone exports, check the three `PHONEDEX_AGENTPHONE_*` environment variables, the inbound caller ID and completed provider record; the exporter refuses ambiguous matches and stores no local plaintext retry spool. |
 | You need current command options | Run `python phonedex.py --help`, `python phonedex.py dial --help`, or `python sip_tls_gateway.py --help`. |
 
+## SIP abuse and resilience protection
+
+Inbound SIP calls have basic in-memory protection against rapid repeated
+hangups (three short calls within 90 seconds trigger a 60-second cooldown),
+INVITE replay, and extreme call bursts. Cooldown calls are rejected before
+GPT Live starts, using standard SIP `Retry-After` signaling—not a
+prerecorded audio announcement. See [SIP hardening](docs/SIP_HARDENING.md)
+for thresholds, privacy considerations and limitations.
+
 ## Limitations and roadmap
+
+**Linux compatibility is a planned milestone**, including reproducible installation
+on a clean Linux host, dependency verification, `systemd` service setup, SIP/RTP
+testing and Linux CI. See the [project roadmap](docs/ROADMAP.md) for acceptance
+criteria and status; this has not yet been verified end-to-end.
+
 
 - One outbound call at a time; no complete SIP transaction stack, broad fuzzing, production security audit, or commercial SLA.
 - Generic Linux/macOS installation and arbitrary carrier compatibility are unverified. The current release notes record offline Windows validation; that is not a carrier compatibility guarantee.
@@ -310,6 +384,7 @@ The [roadmap and release review](docs/RELEASE_STATUS.md) records current verific
 
 ## Documentation
 
+- [Transcript privacy and local storage](docs/TRANSCRIPT_PRIVACY.md) — local SQLite, no-retention mode, remote transcript opt-in, data flow and deletion.
 - [Guided setup and readiness checks](docs/ONBOARDING.md) — interactive local configuration, remote control options, and remaining manual steps.
 - [AgentPhone credit savings](docs/AGENTPHONE_CREDIT_SAVINGS.md) — measured 90.9% outbound and 98.3% inbound AgentPhone charge reductions, with an anonymized transaction ledger.
 - [Technical notes](docs/TECHNICAL_NOTES.md) — media, control, authentication, and data boundaries.

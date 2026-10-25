@@ -128,6 +128,64 @@ class SIPTeardownTests(unittest.IsolatedAsyncioTestCase):
         reader.feed_eof()
         await asyncio.wait_for(job,2)
 
+    async def test_duplicate_invite_retransmission_does_not_restart_model(self):
+        g=gateway()
+        reader,writer,job=await self.start_call(g,'same_dialog')
+        initial=[x for x in writer.buffers if b'SIP/2.0 200 OK' in x][0]
+        reader.feed_data(packet('INVITE','same_dialog',offer()))
+        await asyncio.sleep(.06)
+        replies=[x for x in writer.buffers if b'SIP/2.0 200 OK' in x]
+        self.assertEqual(len(replies),2)
+        self.assertEqual(replies[0],initial)
+        self.assertEqual(replies[1],initial)
+        g.model.activate_inbound.assert_called_once()
+        reader.feed_eof()
+        await asyncio.wait_for(job,2)
+
+    async def test_rapid_hangup_cooldown_does_not_start_model(self):
+        g=gateway()
+        # The test carrier supplies a syntactically valid E.164 caller identity.
+        def from_caller(message):
+            return message.replace(b'sip:caller@localhost',b'sip:+12025550123@localhost')
+        for n in range(3):
+            reader=asyncio.StreamReader();writer=FakeWriter()
+            task=asyncio.create_task(g.handle_tls(reader,writer))
+            ident='rapid_'+str(n)
+            reader.feed_data(from_caller(packet('INVITE',ident,offer())))
+            await asyncio.sleep(.05)
+            self.assertIsNotNone(g.call)
+            reader.feed_data(from_caller(packet('BYE',ident)))
+            await asyncio.sleep(.06)
+            reader.feed_eof()
+            await asyncio.wait_for(task,2)
+            self.assertIsNone(g.call)
+        prior_calls=g.calls
+        reader=asyncio.StreamReader();writer=FakeWriter()
+        task=asyncio.create_task(g.handle_tls(reader,writer))
+        reader.feed_data(from_caller(packet('INVITE','rapid_blocked',offer())))
+        await asyncio.sleep(.06)
+        response=b''.join(writer.buffers)
+        self.assertIn(b'480 Temporarily Unavailable',response)
+        self.assertIn(b'Retry-After:',response)
+        self.assertEqual(g.calls,prior_calls)
+        self.assertIsNone(g.call)
+        reader.feed_eof()
+        await asyncio.wait_for(task,2)
+
+    async def test_completed_dialog_invite_replay_does_not_restart_model(self):
+        g=gateway()
+        reader,writer,task=await self.start_call(g,'done_dialog')
+        reader.feed_data(packet('BYE','done_dialog'))
+        await asyncio.sleep(.06)
+        self.assertIsNone(g.call)
+        count=g.calls
+        reader.feed_data(packet('INVITE','done_dialog',offer()))
+        await asyncio.sleep(.06)
+        self.assertIn(b'481 Call/Transaction Does Not Exist',b''.join(writer.buffers))
+        self.assertEqual(g.calls,count)
+        reader.feed_eof()
+        await asyncio.wait_for(task,2)
+
     async def test_bridge_audio_idle_notifies_once(self):
         calls=[]
         def callback():

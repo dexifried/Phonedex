@@ -40,12 +40,29 @@ because a lengthy greeting was inconclusive.
 ## Control path
 
 - A remote agent calls the Cloudflare Worker with the operator bearer token.
-- The Worker validates call arguments and stores queue items, command records, statuses, and transcript text in KV.
+- The Worker validates call arguments and stores queue items, command records and statuses in KV. Transcript text is sent **only when PHONEDEX_TRANSCRIPT_MODE is worker or both**.
 - The local Python controller initiates outbound HTTPS polling to the Worker. It does not listen for inbound public control requests and holds the SIP trunk credentials locally.
 - A different gateway bearer token authenticates controller polling and event uploads. Do not reuse the operator token.
 - Call/control records use a three-hour KV TTL. Transcript batches use a 24-hour TTL. KV consistency can delay when a newly written transcript appears to a reader.
 
-The Worker never receives RTP/SRTP audio or SIP account credentials. It does receive transcript text and limited call metadata.
+The Worker never receives RTP/SRTP audio or SIP account credentials. It receives queued numbers, operator prompts and call-control metadata for remote control. Transcript text is an independent opt-in; the default transcript mode is off.
+
+## Transcript storage policy
+
+- `harness/transcript_store.py` defines off/local/worker/both modes, default
+  off. The outbound controller only creates transcript upload events for worker
+  and both; off persists no text locally and makes no transcript upload.
+- Local/both modes write SQLite transcript fragments to a local folder under
+  `PHONEDEX_DATA_DIR` (default `~/.phonedex`). Inbound calls use random local
+  IDs, never the provider SIP Call-ID; no phone number is stored in the local
+  table. The database is plaintext and relies on OS file permissions.
+- Expired local records are pruned when data is written or on manual prune,
+  not by a guaranteed scheduled background task. Consult
+  [transcript privacy](TRANSCRIPT_PRIVACY.md) for details.
+- The optional AgentPhone Calls dashboard exporter is independent of these
+  modes and remains opt-in with separate explicit environment settings.
+- The SIP provider and GPT Live still handle call media. Remote control still
+  stores its required metadata in Cloudflare even in local/off transcript mode.
 
 ## RTP interruption and optional transcript publishing
 
@@ -94,6 +111,7 @@ Normal mode does not receive the business tools. Neither mode books appointments
 | RTP/WebRTC bridge | `bridge.py`, `phonebridge/` |
 | Remote call control | `harness/agent_controller.py`, `harness/agent_client.py` |
 | Business tools | `harness/tools.py`, `harness/delegation.py` |
+| Local transcript privacy | `harness/transcript_store.py`, `docs/TRANSCRIPT_PRIVACY.md` |
 | Cloudflare control plane | `worker/src/agent_routes.mjs`, `worker/src/index.mjs` |
 | Offline tests | `test_*.py`, `worker/test-agent.mjs` |
 

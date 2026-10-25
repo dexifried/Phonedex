@@ -6,12 +6,24 @@ installs software, configures a router, creates cloud resources, or deploys code
 
 ## Start here
 
-From the project directory:
+Start with the [first-run quickstart](FIRST_RUN.md). From the project
+directory, prepare a private Python environment:
 
-```shell
+```sh
+python scripts/bootstrap.py            # asks before local dependency installation
+python scripts/bootstrap.py --check    # read-only alternative
+```
+
+After that, use the `.venv` Python executable printed by the bootstrap:
+
+```sh
+# These examples assume your shell is already using the project .venv:
 python phonedex.py setup --check
 python phonedex.py setup
 ```
+
+Outside an activated environment, use `.venv/Scripts/python.exe` on Windows
+or `.venv/bin/python` on macOS/Linux instead of `python`.
 
 The first command prints a **read-only checklist**. The second interactively
 writes a new private `.env` (only when explicitly confirmed). Use a normal
@@ -50,7 +62,7 @@ additional Worker requirements.
 
 ## Finish local setup
 
-1. Install Python 3.11+ and the dependencies using `python -m pip install -r requirements.txt`.
+1. Install a full Python 3.11+ distribution; run `python scripts/bootstrap.py` to install dependencies into an ignored `.venv`, not system Python.
 2. Install the Codex CLI and run `codex login` with an authorized account.
 3. Complete the wizard with your provider's information, manually configure
    and test UDP forwarding for the port in `.env`, then change
@@ -80,9 +92,7 @@ are separately controlled steps.
 
 ## Known onboarding gaps / prioritized improvements
 
-1. **Dependency bootstrap:** Detect and install Python wheels using an
-   explicitly confirmed command and an isolated environment. Handle embedded
-   Windows Python builds that lack pip/venv. Never silently alter system Python.
+1. **Dependency bootstrap (implemented):** `scripts/bootstrap.py` checks Python/venv, asks before installing project-local packages, and reports missing standard `venv` support. Wheel availability is platform-dependent.
 2. **Guided Cloudflare deployment:** With explicit Cloudflare login/permission,
    provision KV, set two independent secrets, deploy Worker and verify HTTPS
    health. Keep private credentials local and never log them.
@@ -92,9 +102,13 @@ are separately controlled steps.
 4. **Private credential storage:** Move SIP credentials and Worker gateway
    secrets from plaintext `.env` to an OS-specific credential vault, retaining
    an explicit export/migration path.
-5. **Package distribution:** Signed releases or installer binaries for Windows,
+5. **Linux compatibility:** Validate setup, native audio/SRTP dependencies,
+   Codex authentication, SIP/RTP, and optional `systemd` deployment on a clean
+   Linux host, with Linux CI coverage and a separately authorized carrier test.
+   Track progress in [ROADMAP.md](ROADMAP.md).
+6. **Package distribution:** Signed releases or installer binaries for Windows,
    Linux and macOS, with a tested update/uninstall workflow.
-6. **First-call verification:** Show model/SIP readiness, call progress, hangup
+7. **First-call verification:** Show model/SIP readiness, call progress, hangup
    completion and estimated telecom billing, without revealing caller data.
 
 Do not claim one-click installation, automatic compatibility with every SIP

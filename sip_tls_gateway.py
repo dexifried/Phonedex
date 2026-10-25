@@ -22,9 +22,11 @@ import os
 from pathlib import Path
 import re
 import secrets
+import sqlite3
 import ssl
 import sys
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
 
 ROOT=Path(__file__).resolve().parent
 sys.path.insert(0,str(ROOT))
@@ -33,9 +35,11 @@ if str(VENDOR) not in sys.path:sys.path.insert(0,str(VENDOR))
 from pylibsrtp import Policy, Session, Error as SrtpError
 from bridge import RTPBridge
 from phonebridge.audio import RTPPacket
+from phonebridge.inbound_abuse_guard import InboundAbuseGuard
 from phonebridge.agentphone_transcripts import (
     AgentPhonePublisher, TranscriptCapture, from_sip_identity,
 )
+from harness.transcript_store import LocalTranscriptStore, local_enabled
 
 LOG=logging.getLogger('phonedex-sip-tls')
 MAX_HEADERS=8192
@@ -55,6 +59,9 @@ class Call:
     outbound_srtp:Session
     active:bool=True
     bye_sent:bool=False
+    started_mono:float=field(default_factory=time.monotonic)
+    invite_cseq:str=''
+    cached_invite_response:bytes|None=None
 
 
 def parse_sdp(sdp:str,allow_loopback:bool):
@@ -79,7 +86,7 @@ def parse_sdp(sdp:str,allow_loopback:bool):
     return (str(ip),port),key
 
 
-def response_bytes(status:str,h:dict,body:str='',to_tag:str='',contact:str='')->bytes:
+def response_bytes(status:str,h:dict,body:str='',to_tag:str='',contact:str='',retry_after:int=0)->bytes:
     to=h.get('to','')
     if to_tag and ';tag=' not in to.lower():to+=';tag='+to_tag
     body_bytes=body.encode('ascii')
@@ -98,6 +105,7 @@ def response_bytes(status:str,h:dict,body:str='',to_tag:str='',contact:str='')->
     if contact and body_bytes and status.startswith('200 '):
         lines.insert(-1,'Contact: <'+contact+'>')
     if body_bytes:lines.insert(-1,'Content-Type: application/sdp')
+    if retry_after>0:lines.insert(-1,'Retry-After: '+str(int(retry_after)))
     return ('\r\n'.join(lines)+'\r\n\r\n').encode('ascii')+body_bytes
 
 
@@ -181,7 +189,11 @@ class SipsGateway:
         self.transcript_capture=None
         self.transcript_from=None
         self.transcript_started=None
+        self.local_transcript_id=None
+        self.local_transcript_store=(LocalTranscriptStore()
+                                     if getattr(args,'backend','echo')=='subscription' and local_enabled() else None)
         self.transcript_tasks=set()
+        self.abuse_guard=InboundAbuseGuard()
 
     def allowed(self,address):
         addr=ipaddress.ip_address(address)
@@ -190,6 +202,7 @@ class SipsGateway:
     async def _finish_call(self,call):
         """Release model/media exactly once and make room for the next call."""
         if self.call is not call:return
+        self.abuse_guard.record_completed_dialog(getattr(call,'ident',None))
         call.active=False
         self.call=None
         self.signal_writer=None
@@ -197,14 +210,31 @@ class SipsGateway:
         captured=self.transcript_capture
         caller=self.transcript_from
         started=self.transcript_started
+        local_id=self.local_transcript_id
         self.transcript_capture=None
         self.transcript_from=None
         self.transcript_started=None
+        self.local_transcript_id=None
         self.model.opts.on_media_idle=None
         await self.model.reset_call()
         self.model.opts.call_control=None
         if captured is not None:
+            local_items=captured.copy_for_local() if self.local_transcript_store is not None else []
             turns=captured.close()
+            if self.local_transcript_store is not None and local_id and started and local_items:
+                # Keep sensitive text on the operator's machine. Local writes
+                # happen outside SIP teardown; they never block carrier BYE.
+                # The fresh random ID is unrelated to the provider SIP Call-ID.
+                async def save_local():
+                    try:
+                        await asyncio.to_thread(
+                            self.local_transcript_store.append,local_id,'inbound',
+                            started,0,local_items[:2000])
+                    except (OSError,ValueError,RuntimeError,sqlite3.Error) as exc:
+                        LOG.warning('Local inbound transcript save failed (%s)',type(exc).__name__)
+                task=asyncio.create_task(save_local())
+                self.transcript_tasks.add(task)
+                task.add_done_callback(self.transcript_tasks.discard)
             if self.transcript_publisher is not None and caller and started and turns:
                 # Best-effort independent background upload. Never stall SIP
                 # response, BYE, or model/audio cleanup on an HTTPS request.
@@ -290,14 +320,32 @@ class SipsGateway:
                     if h.get('cseq','').strip().upper().endswith(' BYE'):
                         LOG.info('Carrier BYE response status=%s',h.get('_response_code','unknown'))
                     continue
-                status='200 OK';answer='';tag='';cleanup=None
+                status='200 OK';answer='';tag='';cleanup=None;retry_after=0;cached_response=None
                 async with self.lock:
                     if method=='OPTIONS':pass
                     elif method=='INVITE':
                         if self.call:
-                            status='486 Busy Here'
+                            current=self.call
+                            if (current.ident==h.get('call-id') and
+                                    current.invite_cseq==h.get('cseq') and
+                                    current.from_header==h.get('from') and
+                                    current.to_header==h.get('to') and
+                                    current.cached_invite_response is not None):
+                                cached_response=current.cached_invite_response
+                                LOG.info('Duplicate active INVITE; replaying original SIP response')
+                            else:
+                                status='486 Busy Here'
+                        elif self.abuse_guard.is_replayed_dialog(h.get('call-id','')):
+                            status='481 Call/Transaction Does Not Exist'
+                            LOG.info('Completed SIP dialog INVITE replay rejected')
                         elif not h.get('call-id') or not h.get('via') or not h.get('cseq'):
                             status='400 Bad Request'
+                        elif (block:=self.abuse_guard.check_invite(h.get('from','')))[0]:
+                            reason,retry_after=block
+                            status=('503 Service Unavailable' if reason=='global_burst'
+                                    else '480 Temporarily Unavailable')
+                            LOG.warning('Inbound INVITE throttled; reason=%s retry_seconds=%d',
+                                        reason,retry_after)
                         else:
                             try:
                                 media,remote_key=parse_sdp(sdp,self.opts.bind=='127.0.0.1')
@@ -305,18 +353,22 @@ class SipsGateway:
                                 local_tag=secrets.token_hex(8)
                                 rx=Session(policy=Policy(key=remote_key,ssrc_type=Policy.SSRC_ANY_INBOUND))
                                 tx=Session(policy=Policy(key=local_key,ssrc_type=Policy.SSRC_ANY_OUTBOUND))
-                                self.call=Call(h['call-id'],media,h.get('from',''),h.get('to',''),h.get('via',''),local_tag,rx,tx)
+                                self.call=Call(h['call-id'],media,h.get('from',''),h.get('to',''),h.get('via',''),local_tag,rx,tx,
+                                               invite_cseq=h.get('cseq',''))
                                 self.signal_writer=writer
                                 self.signal_headers=dict(h)
                                 caller=from_sip_identity(h.get('from'))
-                                if self.transcript_publisher is not None and caller:
+                                if self.transcript_publisher is not None or self.local_transcript_store is not None:
                                     self.transcript_capture=TranscriptCapture()
-                                    self.transcript_from=caller
+                                    self.transcript_from=caller if self.transcript_publisher is not None else None
                                     self.transcript_started=datetime.now(timezone.utc).isoformat()
+                                    self.local_transcript_id=('call_'+secrets.token_hex(16)
+                                                              if self.local_transcript_store is not None else None)
                                 else:
                                     self.transcript_capture=None
                                     self.transcript_from=None
                                     self.transcript_started=None
+                                    self.local_transcript_id=None
                                 if self.media is not None:
                                     self.media.accepted=0;self.media.returned=0
                                 key64=base64.b64encode(local_key).decode('ascii')
@@ -339,6 +391,10 @@ class SipsGateway:
                         if self.call and self.call.ident==h.get('call-id'):
                             tag=self.call.to_tag
                             cleanup=self.call
+                            if self.abuse_guard.record_remote_end(
+                                    cleanup.from_header,
+                                    elapsed=time.monotonic()-cleanup.started_mono):
+                                LOG.warning('Repeated rapid hangups triggered a 60s cooldown')
                             # Stop relaying RTP immediately; send 200 before
                             # any slow WebRTC/model teardown.
                             cleanup.active=False
@@ -352,12 +408,17 @@ class SipsGateway:
                     if not re.fullmatch(r'[A-Za-z0-9.-]{1,253}',host):
                         raise ValueError('Invalid SIP Contact hostname')
                     contact='sip:phonedex@'+host+':'+str(self.opts.sip_port)+';transport=tls'
-                writer.write(response_bytes(status,h,answer,tag,contact))
+                packet=(cached_response if cached_response is not None else
+                        response_bytes(status,h,answer,tag,contact,retry_after=retry_after))
+                if (method=='INVITE' and status=='200 OK' and cached_response is None
+                        and self.call and self.call.ident==h.get('call-id')):
+                    self.call.cached_invite_response=packet
+                writer.write(packet)
                 await writer.drain()
                 if cleanup is not None:
                     async with self.lock:
                         if self.call is cleanup:await self._finish_call(cleanup)
-                elif method=='INVITE' and status=='200 OK':
+                elif method=='INVITE' and status=='200 OK' and cached_response is None:
                     if self.call and self.signal_writer is writer:
                         call=self.call
                         self.model.opts.on_media_idle=lambda: self._on_inbound_media_idle(call,writer)
