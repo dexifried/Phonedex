@@ -437,7 +437,11 @@ class SipsGateway:
 
 async def run(args):
     gateway=SipsGateway(args)
-    model_opts=argparse.Namespace(backend=args.backend,prompt=Path(args.prompt_file).read_text(encoding='utf-8'),idle_seconds=45,codex_exe='codex',model_wake_file=getattr(args,'model_wake_file',None))
+    from phonebridge.calling_profile import personalization_prompt
+    initial_prompt=Path(args.prompt_file).read_text(encoding='utf-8')
+    preferences=personalization_prompt(agent=getattr(args, 'calling_agent', None))
+    if preferences: initial_prompt += '\n' + preferences
+    model_opts=argparse.Namespace(backend=args.backend,prompt=initial_prompt,idle_seconds=45,codex_exe='codex',model_wake_file=getattr(args,'model_wake_file',None))
     loop=asyncio.get_running_loop()
     model=RTPBridge(model_opts)
     model_socket,_=await loop.create_datagram_endpoint(lambda:model,local_addr=('127.0.0.1',0))

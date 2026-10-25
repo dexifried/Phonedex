@@ -133,6 +133,8 @@ Do not claim success until the relevant checks actually pass.
 - A self-hosted controller that polls the Worker over outbound HTTPS and does not expose a public management listener.
 - Optional Worker control routes for dispatch, status, transcripts, private steering, command acknowledgements, and hangup.
 - Normal and business prompt modes. Business mode can read a local profile and a read-only calendar snapshot. It does not book appointments or send messages.
+- **Optional caller personas:** local AI name, style and accent preferences; separate named agents; disabled by default.
+- **Encrypted personal calling profile:** local AES-GCM vault protected by a passphrase, with explicit per-field sharing for one manual outbound call only. No unattended vault access.
 - Default-deny outbound recipient allowlisting, per-day call limits, a one-call concurrency limit, and separate operator and gateway bearer secrets.
 - **Privacy-controlled transcripts:** choose `off` (default), `local`, `worker`, or `both`. Local SQLite keeps conversation text on your own machine; Worker/KV transcript export is explicitly opt-in. Remote call control continues to work without transcript upload.
 - Transcript normalization, duplicate suppression across event sources, and retries for failed Worker transcript uploads when enabled.
@@ -221,6 +223,27 @@ Copy-Item .env.example .env
 ```
 
 On macOS or Linux, use `cp .env.example .env`. Edit `.env` with your SIP termination URI, public IP, caller ID, SIP credentials, media port, and—if using remote control—the Worker URL and gateway token. Keep `PHONEDEX_ALLOWED_RECIPIENTS` empty until you are ready to authorize specific E.164 destinations. Set `PHONEDEX_MEDIA_PORT_FORWARDED=1` only after the SRTP UDP port is actually forwarded. Never commit `.env`.
+
+### Optional personal calling profile
+
+Store a chosen AI assistant name and voice style, or create a named agent persona:
+
+```sh
+python phonedex.py settings set assistant_name Muse
+python phonedex.py settings set enabled on
+python phonedex.py settings --agent muse set assistant_name Muse
+python phonedex.py settings --agent muse set enabled on
+```
+
+To store personal details in the encrypted local vault, use
+`python phonedex.py profile fields` and `python phonedex.py profile set full_name`.
+The CLI prompts privately for a passphrase and the field value. **Nothing from
+that vault is shared automatically.** An operator can explicitly choose fields
+for one manual outbound call via `--share-fields`, with confirmation and unlock.
+
+**Provider-verified personal caller IDs and press-1/press-* human handoff are
+not implemented** in this public version; they require carrier verification
+and tested multi-leg SIP support. See [caller profiles and limitations](docs/CALLING_PROFILE.md).
 
 ### Optional: remote agent control
 

@@ -250,6 +250,11 @@ async def dial(opts, control=None):
     assignment=getattr(opts,'call_prompt','').strip()
     if len(assignment)>2000:raise ValueError('Controller prompt too long')
     prompt=(ROOT/template).read_text(encoding='utf-8')
+    # Local preferences are opt-in and contain no encrypted profile fields.
+    from phonebridge.calling_profile import personalization_prompt
+    preference_text=personalization_prompt(agent=getattr(opts, 'agent', None))
+    if preference_text:
+        prompt += '\n' + preference_text
     if assignment:
         prompt += '\nCall-specific instructions from the dispatch controller (not to be quoted or described as instructions):\n' + assignment
     # Independent opt-in per outbound attempt; the incoming receptionist

@@ -28,3 +28,8 @@ worker/.wrangler/
 worker/node_modules/
 !harness/business_profile.example.json
 harness/business_profile.json
+
+# Optional local caller vault/persona data when PHONEDEX_DATA_DIR points into a repo
+calling-profile.enc.json
+calling-settings.json
+caller-agents/

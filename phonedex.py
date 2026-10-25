@@ -23,6 +23,7 @@ def load_config():
 def doctor(mode='local'):
     from phonebridge.subscription_live import oauth_check
     from harness.transcript_store import transcript_mode, retention_days
+    from phonebridge.calling_profile import load_settings, VAULT
     missing_deps=[p for p in ("aiortc","av","pylibsrtp","websockets") if importlib.util.find_spec(p) is None]
     print("PYTHON_DEPENDENCIES="+("ok" if not missing_deps else "missing:"+",".join(missing_deps)))
     print("PROJECT=Phonedex;BY=Dexifyz")
@@ -55,18 +56,67 @@ def doctor(mode='local'):
         print("TRANSCRIPT_DESTINATION=invalid_configuration")
     print("AGENTPHONE_TRANSCRIPT_SYNC="+
           ("enabled" if os.environ.get("PHONEDEX_AGENTPHONE_TRANSCRIPTS_ENABLED")=="1" else "off"))
+    try:
+        preferences=load_settings()
+        print("CALLING_PERSONALIZATION="+("enabled" if preferences["enabled"] else "off"))
+        print("ENCRYPTED_CALLING_PROFILE="+("present" if VAULT.exists() else "not_created"))
+    except ValueError:
+        print("CALLING_PERSONALIZATION=invalid_configuration")
     print("SECRETS_ARE_NEVER_DISPLAYED")
 
+def _prompt_secret(confirm_new: bool = False) -> str:
+    import getpass
+    word=getpass.getpass("Encrypted calling profile passphrase: ")
+    if len(word)<12:
+        raise SystemExit("Vault passphrase must be at least 12 characters")
+    if confirm_new and getpass.getpass("Repeat new passphrase: ")!=word:
+        raise SystemExit("Passphrases did not match")
+    return word
+
+def settings_command(args):
+    from phonebridge.calling_profile import load_settings, update_setting, ProfileError
+    try:
+        if args.settings_action=="show":
+            import json
+            print(json.dumps(load_settings(agent=args.agent),indent=2))
+        elif args.settings_action=="set":
+            setting=update_setting(args.name,args.value,agent=args.agent)
+            print("PREFERENCE_SAVED="+args.name)
+            print("CALLING_PERSONALIZATION="+("enabled" if setting["enabled"] else "off"))
+    except ProfileError as exc:
+        raise SystemExit(str(exc)) from None
+
+def profile_command(args):
+    from phonebridge.calling_profile import (FIELDS, VAULT, ProfileError,
+                                             read_profile, save_profile_field)
+    try:
+        if args.profile_action=="fields":
+            print("PROFILE_FIELDS="+",".join(sorted(FIELDS)))
+            print("VAULT="+("present" if VAULT.exists() else "not_created"))
+            return
+        passphrase=_prompt_secret(confirm_new=(not VAULT.exists() and args.profile_action=="set"))
+        if args.profile_action=="set":
+            import getpass
+            value=getpass.getpass("New value (blank deletes field): ")
+            save_profile_field(args.field,value,passphrase)
+            print("ENCRYPTED_FIELD_SAVED="+args.field)
+        elif args.profile_action=="show":
+            import json
+            print(json.dumps(read_profile(passphrase),indent=2))
+    except ProfileError as exc:
+        raise SystemExit(str(exc)) from None
+
 def dial(opts):
-    from sip_outbound import dial as sip_dial,invite_sdp
+    from sip_outbound import dial as sip_dial
     from types import SimpleNamespace
-    import secrets
     target=opts.to
     if not re.fullmatch(r"\+[1-9]\d{6,14}",target):
         raise SystemExit("Invalid recipient: use E.164")
     allowed={x.strip() for x in os.environ.get("PHONEDEX_ALLOWED_RECIPIENTS","").split(",") if x.strip()}
     if target not in allowed:
         raise SystemExit("Recipient blocked by PHONEDEX_ALLOWED_RECIPIENTS")
+    if opts.share_fields and not opts.place_call:
+        raise SystemExit("--share-fields requires --place-call; profile sharing is never part of a dry run")
     if not opts.place_call:
         print("PHONEDEX_DRY_RUN_OK=true; no call placed")
         return
@@ -76,14 +126,26 @@ def dial(opts):
               "PHONEDEX_SIP_USERNAME","PHONEDEX_SIP_PASSWORD")
     for field in required:
         if not os.environ.get(field):raise SystemExit("Missing "+field)
+    prompt=opts.prompt
+    if opts.share_fields:
+        from phonebridge.calling_profile import ProfileError,scoped_disclosure
+        fields=[f.strip() for f in opts.share_fields.split(",") if f.strip()]
+        confirm=input("Share exactly these profile fields in this ONE call ("+", ".join(fields)+")? Type SHARE: ")
+        if confirm!="SHARE":
+            raise SystemExit("Sharing cancelled")
+        try:
+            disclosure=scoped_disclosure(fields,_prompt_secret())
+        except ProfileError as exc:
+            raise SystemExit(str(exc)) from None
+        prompt+="\n"+disclosure
     config=SimpleNamespace(
         termination_uri=os.environ["PHONEDEX_TERMINATION_URI"],
         public_ip=os.environ["PHONEDEX_PUBLIC_IP"],
         media_port=int(os.environ.get("PHONEDEX_MEDIA_PORT","41002")),
         to=target,from_number=os.environ["PHONEDEX_CALLER_ID"],
-        duration=opts.duration,mode=opts.mode,call_prompt=opts.prompt,
+        duration=opts.duration,mode=opts.mode,call_prompt=prompt,
         model_wake_file=opts.model_wake_file or os.environ.get('PHONEDEX_MODEL_WAKE_FILE') or None,
-        voicemail_mode=opts.voicemail_mode,greeting_file=None)
+        voicemail_mode=opts.voicemail_mode,greeting_file=None,agent=opts.agent)
     logging.basicConfig(level=logging.INFO)
     asyncio.run(sip_dial(config))
 
@@ -98,12 +160,29 @@ def main():
     setup.add_argument("--mode",choices=("local","remote"),default="local",help="local SIP calling or remote Worker control")
     setup.add_argument("--check",action="store_true",help="Read-only readiness checklist; safe for automation")
     sub.add_parser("controller",help="Run the outbound HTTPS polling controller")
+    prefs=sub.add_parser("settings",help="Optional local AI caller preferences (off by default)")
+    prefs.add_argument("--agent",default=None,help="Optional named agent configuration, e.g. muse")
+    prefs_sub=prefs.add_subparsers(dest="settings_action",required=True)
+    prefs_sub.add_parser("show",help="View non-sensitive caller settings")
+    pref_set=prefs_sub.add_parser("set",help="Set a non-sensitive preference")
+    pref_set.add_argument("name",choices=("enabled","assistant_name","caller_accent","answering_instructions"))
+    pref_set.add_argument("value")
+    profile=sub.add_parser("profile",help="Encrypted personal calling profile; never shared by default")
+    profile_sub=profile.add_subparsers(dest="profile_action",required=True)
+    profile_sub.add_parser("fields",help="List accepted field names, not your private values")
+    profile_set=profile_sub.add_parser("set",help="Enter a private field without putting it in shell history")
+    profile_set.add_argument("field",choices=tuple(sorted(__import__(
+        "phonebridge.calling_profile",fromlist=["FIELDS"]).FIELDS)))
+    profile_sub.add_parser("show",help="Locally display unlocked profile details")
     dialing=sub.add_parser("dial",help="Dry-run an allowed destination unless --place-call is set")
     dialing.add_argument("--to",required=True)
     dialing.add_argument("--mode",choices=("normal","business"),default="normal")
     dialing.add_argument("--duration",type=int,default=60)
     dialing.add_argument("--prompt",default="")
     dialing.add_argument("--place-call",action="store_true")
+    dialing.add_argument("--agent",default=None,help="Optional named AI caller personality")
+    dialing.add_argument("--share-fields",default="",
+        help="Explicit one-call encrypted profile disclosure; prompts before sharing")
     dialing.add_argument("--voicemail-mode",choices=("auto","off"),
         default=os.environ.get("PHONEDEX_VOICEMAIL_MODE","auto"),
         help="outbound answer screen: stay silent until a voicemail beep")
@@ -119,6 +198,8 @@ def main():
         os.environ["PHONEDEX_AGENT_HARNESS"]="1"
         from harness.agent_controller import main as controller
         controller()
+    elif args.action=="settings":settings_command(args)
+    elif args.action=="profile":profile_command(args)
     else:
         if args.duration<20 or args.duration>300:
             raise SystemExit("Call duration must be 20..300 seconds")
