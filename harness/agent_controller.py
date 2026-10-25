@@ -23,6 +23,7 @@ from harness.agent_client import AgentGatewayClient
 from harness.transcript_store import LocalTranscriptStore, transcript_mode
 from sip_outbound import dial
 from phonebridge.agentphone_trunk import status as trunk_status
+from phonebridge.jev_shadow import JevShadowObserver
 
 LOG=logging.getLogger("dexifyz-agent-controller")
 ID=re.compile(r"^call_[a-f0-9]{32}$")
@@ -61,6 +62,8 @@ class CallControl:
         self.received=deque()
         self.local_received=deque()
         self.transcript_destination=transcript_mode()
+        # Explicitly opt-in, independent of transcript persistence/upload mode.
+        self.shadow=JevShadowObserver.from_env(self.id,request.get("prompt",""))
         self.local_store=(LocalTranscriptStore() if self.transcript_destination in ('local','both') else None)
         self.local_saved_deltas=0
         self.batch=0
@@ -110,6 +113,8 @@ class CallControl:
                 if len(self.event_order)>4096:
                     self.events_seen.discard(self.event_order.popleft())
             speaker="caller" if typ=="session.input_transcript.delta" else "assistant"
+            if self.shadow is not None:
+                self.shadow.on_live_event(event)
             ms=event.get("end_ms",event.get("start_ms",0))
             if not isinstance(ms,(int,float)):ms=0
             if self.transcript_destination == 'off':
@@ -263,6 +268,8 @@ class Controller:
                 voicemail_mode=os.environ.get("PHONEDEX_VOICEMAIL_MODE","auto"),
                 greeting_file=None)
             await session.status("dialing")
+            if session.shadow is not None:
+                session.shadow.start()
             await dial(opts,control=session)
             await session.status("ended")
         except asyncio.CancelledError:
@@ -274,6 +281,8 @@ class Controller:
             await session.status("failed",type(exc).__name__)
         finally:
             await session.flush()
+            if session.shadow is not None:
+                await session.shadow.finish(session.state)
             LOG.info("TRANSCRIPT_DIAG captured=%d local_saved=%d worker_published=%d pending_local=%d pending_worker=%d failures=%d call_mode=%s transcript_mode=%s",
                      session.received_deltas,session.local_saved_deltas,session.delivered_deltas,
                      len(session.local_received),len(session.received),

@@ -1,0 +1,275 @@
+{
+  "description": "Synthetic, hand-labeled early development fixtures, NOT independent accuracy evidence",
+  "schema_version": 1,
+  "cases": [
+    {
+      "id": "voicemail_greeting",
+      "goal": "Ask about room availability",
+      "events": [
+        {
+          "speaker": "caller",
+          "text": "The person you are trying to reach is not available. At the tone please record your message."
+        }
+      ],
+      "expected": {
+        "call_state": "voicemail",
+        "goal_complete": false,
+        "handoff_requested": false,
+        "retry_needed": true,
+        "questions_unanswered": true
+      }
+    },
+    {
+      "id": "automated_menu",
+      "goal": "Ask for store opening hours",
+      "events": [
+        {
+          "speaker": "caller",
+          "text": "For sales press 1. For billing press 2."
+        }
+      ],
+      "expected": {
+        "call_state": "ivr",
+        "goal_complete": false,
+        "handoff_requested": false,
+        "retry_needed": false,
+        "questions_unanswered": true
+      }
+    },
+    {
+      "id": "hold_request",
+      "goal": "Ask about a return policy",
+      "events": [
+        {
+          "speaker": "assistant",
+          "text": "Can you check the return policy?"
+        },
+        {
+          "speaker": "caller",
+          "text": "One moment please, I will check."
+        }
+      ],
+      "expected": {
+        "call_state": "hold",
+        "goal_complete": false,
+        "handoff_requested": false,
+        "retry_needed": false,
+        "questions_unanswered": true
+      }
+    },
+    {
+      "id": "hotel_partial_answer",
+      "goal": "Confirm availability, price, late check-in and pet fee",
+      "events": [
+        {
+          "speaker": "assistant",
+          "text": "Do you have rooms for two adults tonight?"
+        },
+        {
+          "speaker": "caller",
+          "text": "Yes, we have one double room for 103 dollars plus tax."
+        }
+      ],
+      "expected": {
+        "call_state": "speaking",
+        "goal_complete": false,
+        "handoff_requested": false,
+        "retry_needed": false,
+        "questions_unanswered": true
+      }
+    },
+    {
+      "id": "hotel_complete_explicit",
+      "goal": "Confirm availability, price, late check-in and pet fee",
+      "events": [
+        {
+          "speaker": "assistant",
+          "text": "Is the late check-in and pet policy confirmed too?"
+        },
+        {
+          "speaker": "caller",
+          "text": "Yes, those answers are confirmed. You have everything you need."
+        },
+        {
+          "speaker": "assistant",
+          "text": "Thank you for confirming."
+        }
+      ],
+      "expected": {
+        "call_state": "speaking",
+        "goal_complete": true,
+        "handoff_requested": false,
+        "retry_needed": false,
+        "questions_unanswered": false
+      }
+    },
+    {
+      "id": "handoff_request",
+      "goal": "Answer questions about an invoice",
+      "events": [
+        {
+          "speaker": "caller",
+          "text": "I want to speak to a real person please."
+        }
+      ],
+      "expected": {
+        "call_state": "speaking",
+        "goal_complete": false,
+        "handoff_requested": true,
+        "retry_needed": false,
+        "questions_unanswered": true
+      }
+    },
+    {
+      "id": "manager_transfer_request",
+      "goal": "Answer questions about an order",
+      "events": [
+        {
+          "speaker": "caller",
+          "text": "Can you transfer me to the manager?"
+        }
+      ],
+      "expected": {
+        "call_state": "speaking",
+        "goal_complete": false,
+        "handoff_requested": true,
+        "retry_needed": false,
+        "questions_unanswered": true
+      }
+    },
+    {
+      "id": "assistant_mentions_handoff",
+      "goal": "Answer questions about billing",
+      "events": [
+        {
+          "speaker": "assistant",
+          "text": "I can transfer you to a human if you like."
+        },
+        {
+          "speaker": "caller",
+          "text": "No, please keep helping me."
+        }
+      ],
+      "expected": {
+        "call_state": "speaking",
+        "goal_complete": false,
+        "handoff_requested": false,
+        "retry_needed": false,
+        "questions_unanswered": true
+      }
+    },
+    {
+      "id": "voicemail_word_as_topic",
+      "goal": "Ask whether voicemail service is provided",
+      "events": [
+        {
+          "speaker": "assistant",
+          "text": "Do you provide voicemail services?"
+        },
+        {
+          "speaker": "caller",
+          "text": "We provide voicemail services and call recording."
+        }
+      ],
+      "expected": {
+        "call_state": "speaking",
+        "goal_complete": false,
+        "handoff_requested": false,
+        "retry_needed": false,
+        "questions_unanswered": true
+      }
+    },
+    {
+      "id": "closing",
+      "goal": "Ask for an appointment",
+      "events": [
+        {
+          "speaker": "assistant",
+          "text": "Thanks for your help."
+        },
+        {
+          "speaker": "caller",
+          "text": "Goodbye, have a nice day."
+        }
+      ],
+      "expected": {
+        "call_state": "closing",
+        "goal_complete": false,
+        "handoff_requested": false,
+        "retry_needed": false,
+        "questions_unanswered": true
+      }
+    },
+    {
+      "id": "menu_press_star",
+      "goal": "Speak with a representative",
+      "events": [
+        {
+          "speaker": "caller",
+          "text": "For a representative press star now."
+        }
+      ],
+      "expected": {
+        "call_state": "ivr",
+        "goal_complete": false,
+        "handoff_requested": false,
+        "retry_needed": false,
+        "questions_unanswered": true
+      }
+    },
+    {
+      "id": "initial_unknown",
+      "goal": "Get room rates",
+      "events": [],
+      "expected": {
+        "call_state": "unknown",
+        "goal_complete": false,
+        "handoff_requested": false,
+        "retry_needed": false,
+        "questions_unanswered": true
+      }
+    },
+    {
+      "id": "smalltalk",
+      "goal": "Ask about Friday karaoke",
+      "events": [
+        {
+          "speaker": "caller",
+          "text": "The weather is beautiful today."
+        },
+        {
+          "speaker": "assistant",
+          "text": "It really is."
+        }
+      ],
+      "expected": {
+        "call_state": "speaking",
+        "goal_complete": false,
+        "handoff_requested": false,
+        "retry_needed": false,
+        "questions_unanswered": true
+      }
+    },
+    {
+      "id": "unanswered_before_goodbye",
+      "goal": "Get the total price",
+      "events": [
+        {
+          "speaker": "assistant",
+          "text": "Do you know the total price?"
+        },
+        {
+          "speaker": "caller",
+          "text": "I am not sure, call back tomorrow. Goodbye."
+        }
+      ],
+      "expected": {
+        "call_state": "closing",
+        "goal_complete": false,
+        "handoff_requested": false,
+        "retry_needed": true,
+        "questions_unanswered": true
+      }
+    }
+  ]
+}

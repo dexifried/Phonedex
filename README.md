@@ -425,3 +425,12 @@ The [roadmap and release review](docs/RELEASE_STATUS.md) records current verific
 PhoneDex is created and maintained by Dexifyz (Austin Harvey) and is MIT-licensed. The GPT Live WebRTC negotiation and audio approach was informed by and adapted from TheSmokeDev's [Hermes Talk](https://github.com/TheSmokeDev/hermes-talk); its copyright and MIT license are preserved in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and [licenses/HERMES_TALK_LICENSE.txt](licenses/HERMES_TALK_LICENSE.txt). PhoneDex is not affiliated with or endorsed by OpenAI, Codex, AgentPhone, or Hermes Talk.
 
 The subscription-backed GPT Live endpoint is undocumented, can change or become unavailable, and does not establish authorization to use it. Review the applicable service terms before use. Calls can incur SIP carrier charges even though PhoneDex does not use an OpenAI API key.
+
+### Optional Jev full-call shadow monitor
+
+An opt-in, advisory-only Jev observer can independently analyze the entire
+caller/assistant transcript for goals, missing answers, handoff requests, and
+final outcomes, without entering the live audio path. Disabled by default;
+supports hosted TypeSafe Jev, local Kev-4B/0.8B or CPU-only rules. See [Jev shadow setup and
+privacy](docs/JEV_SHADOW.md). No transfer, retry, or hangup actions are
+automatically executed by the observer.

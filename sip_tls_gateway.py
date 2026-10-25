@@ -40,6 +40,7 @@ from phonebridge.agentphone_transcripts import (
     AgentPhonePublisher, TranscriptCapture, from_sip_identity,
 )
 from harness.transcript_store import LocalTranscriptStore, local_enabled
+from phonebridge.jev_shadow import JevShadowObserver, CallEventFanout
 
 LOG=logging.getLogger('phonedex-sip-tls')
 MAX_HEADERS=8192
@@ -187,6 +188,7 @@ class SipsGateway:
         self.transcript_publisher=(AgentPhonePublisher.from_env()
                                    if getattr(args,'backend','echo')=='subscription' else None)
         self.transcript_capture=None
+        self.shadow_observer=None
         self.transcript_from=None
         self.transcript_started=None
         self.local_transcript_id=None
@@ -208,6 +210,8 @@ class SipsGateway:
         self.signal_writer=None
         self.signal_headers=None
         captured=self.transcript_capture
+        shadow=self.shadow_observer
+        self.shadow_observer=None
         caller=self.transcript_from
         started=self.transcript_started
         local_id=self.local_transcript_id
@@ -218,6 +222,11 @@ class SipsGateway:
         self.model.opts.on_media_idle=None
         await self.model.reset_call()
         self.model.opts.call_control=None
+        if shadow is not None:
+            # Never delay SIP BYE while Jev performs its final audit.
+            task=asyncio.create_task(shadow.finish("ended"))
+            self.transcript_tasks.add(task)
+            task.add_done_callback(self.transcript_tasks.discard)
         if captured is not None:
             local_items=captured.copy_for_local() if self.local_transcript_store is not None else []
             turns=captured.close()
@@ -369,6 +378,9 @@ class SipsGateway:
                                     self.transcript_from=None
                                     self.transcript_started=None
                                     self.local_transcript_id=None
+                                self.shadow_observer=JevShadowObserver.from_env(
+                                    "call_"+secrets.token_hex(16),
+                                    getattr(self.opts,"prompt",""))
                                 if self.media is not None:
                                     self.media.accepted=0;self.media.returned=0
                                 key64=base64.b64encode(local_key).decode('ascii')
@@ -422,7 +434,11 @@ class SipsGateway:
                     if self.call and self.signal_writer is writer:
                         call=self.call
                         self.model.opts.on_media_idle=lambda: self._on_inbound_media_idle(call,writer)
-                        self.model.opts.call_control=self.transcript_capture
+                        if self.shadow_observer is not None:
+                            self.shadow_observer.start()
+                        self.model.opts.call_control=(
+                            CallEventFanout(self.transcript_capture,self.shadow_observer)
+                            if self.shadow_observer is not None else self.transcript_capture)
                         self.model.activate_inbound(self.opts.media_port)
         except (OSError,ConnectionError) as exc:
             LOG.warning('SIP signaling transport closed (%s)',type(exc).__name__)
