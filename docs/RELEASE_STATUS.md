@@ -1,79 +1,80 @@
 # PhoneDex — Experimental Release Status
 
-**Snapshot:** 2026-10-24 · v0.1.0-preview.6 candidate
-**Status:** Open-source experimental reference; not production ready.
+**Snapshot:** October 25, 2026 — v0.1.0-preview.7
+**Status:** Source-only experimental prerelease; not production ready.
 
-## What is provided
+## What's included
 
-PhoneDex is a portable Python + optional Cloudflare Worker sample combining
-SIP/TLS signaling, an RTP/WebRTC audio bridge, and a Codex-authenticated GPT Live
-subscription session. It is a source release, not the private live Muse deployment.
+PhoneDex is an experimental, self-hosted Python SIP/TLS and SRTP/RTP bridge
+to a Codex-authenticated GPT Live subscription session, with optional
+Cloudflare Worker control. The GPT Live subscription endpoint is
+undocumented, and availability and permitted use may change. Check the
+applicable terms before deployment.
 
-The subscription-backed GPT Live endpoint is undocumented, not an official
-public OpenAI Realtime API, and its availability and authorized uses are NOT
-guaranteed. Confirm service terms before deploying or making calls.
+This is a **public portable reference**, not a dump of the private running
+Muse gateway. It does not include production credentials, private caller
+logs, or a fully verified carrier handoff.
+
+## What's new in preview.7
+
+- **Simpler onboarding:** opt-in local virtualenv bootstrap, read-only
+  prerequisites, mode-aware diagnostics and first-run troubleshooting.
+  Cloudflare is optional for local outbound calling.
+- **Transcript privacy controls:** configurable `off` (default),
+  `local`, `worker` and `both` modes; local transcripts go into a
+  plaintext SQLite database with configurable retention and CLI commands.
+  The independent opt-in AgentPhone provider transcript exporter remains
+  separate; privacy mode `off` does **not** override an explicitly enabled
+  provider exporter.
+- **Inbound SIP resilience:** rate limiting for repeated very short
+  caller-confirmed hangups (three under-five-second calls within 90
+  seconds -> 60-second cooldown), global burst throttling, duplicate
+  INVITE retransmission handling and completed-dialog replay protection.
+  Rejected calls get SIP `Retry-After` rather than a voice announcement.
+- **Linux roadmap:** initial Arch/EndeavourOS validation planned; not yet
+  tested or advertised as fully supported.
+
+Previously published preview features include caller barge-in, optional
+provider transcript export, inbound and outbound audio bridge prototypes,
+and experimental outbound voicemail beep screening.
 
 ## Verification
 
-- The initial public source snapshot was copied exclusively from tracked files
-  of a previously tested private preview and initialized as a new Git root.
-  No old Git commit history, private credentials, or private runtime logs were imported.
-- The initial public preview contained 36 tests; the updated suite includes 74 offline Python tests covering barge-in, optional AgentPhone transcript export and outbound voicemail detection.
-  The suites passed the private source GitHub Actions workflow before migration.
-  Public-repository CI is the authoritative check for the newly published repository.
-- Cloudflare Worker route tests pass offline; they do not make real phone calls.
-- The release audit checks committed filenames/text for common secret patterns,
-  private user paths, and image EXIF metadata. This heuristic cannot prove the
-  absence of all possible sensitive data or vulnerabilities.
-- No carrier calls or production deployments are part of the offline tests.
+- Public branch: 91 general offline Python tests plus 21 focused SIP
+  tests passed in local regression checks. Some focused cases overlap
+  the general suite, so these are executions, not unique test counts.
+- Cloudflare Worker route tests passed offline.
+- The GitHub Actions Python and Worker test jobs both passed on
+  the preview.7 pull request (recheck after any subsequent commit).
+- The heuristic release audit reported zero issues. That is not a
+  security audit, penetration test or carrier certification.
+- No PSTN calls, provider media tests or new gateway deployments are
+  part of the public release verification.
 
-## Added after the initial public preview
+## Known limitations
 
-- Portable caller barge-in with queue flushing, RTP silence keepalive, and
-  immediate caller input priority over the synthetic greeting.
-- Optional AgentPhone transcript export using an explicit private API key and
-  phone-number ID; fail-closed matching, no WAV/audio recording, no disk spool,
-  no partial uploads or blind retry after an ambiguous POST.
-- 38 additional offline tests (74 total), run in CI.
+- No verified universal carrier compatibility, NAT traversal, SIP
+  transaction handling, SRTP media handling or load/performance guarantees.
+- No verified human call transfer in this public release. The reference
+  handoff spec remains in [CALL_HANDOFF_SPEC.md](CALL_HANDOFF_SPEC.md).
+- No sound playback announcement is provided for caller cooldowns;
+  carrier-provided intercept behavior varies.
+- Callers' displayed phone numbers may be spoofable and can cause
+  temporary unfair cooldowns; the limiter is process-local and resets
+  after restart.
+- Local transcript SQLite is **not encrypted at rest**. Remote SIP
+  carriers and GPT Live still process the necessary call data.
+- No fully automated phone-provider provisioning or public deployment.
+- Outbound voicemail detection is heuristic and has not been verified
+  end-to-end on a live carrier.
 
-The live private gateway's call confirmed interruptions and provider
-transcript upload, but this portable implementation has only offline
-validation and is not a certification of third-party carrier behavior.
+## Safe setup and development
 
-## New in preview.6
+Start with [README](../README.md), [First Run](FIRST_RUN.md),
+[Onboarding](ONBOARDING.md), [Transcript Privacy](TRANSCRIPT_PRIVACY.md),
+[SIP Hardening](SIP_HARDENING.md), and [Security](../SECURITY.md).
+Running setup checks or a dial dry run never places a paid phone call.
 
-- Outbound human-versus-machine screening with silent RTP while analyzing,
-  beep-frequency/duration checks, no-beep hangup fallback, and opt-out flag.
-- Separate prompt instructions following confirmed voicemail beep. Optional
-  local model-wake WAV is still needed for reliable first-turn initiation.
-- 17 new offline tests, bringing the current source suite to 73.
-- No real carrier voicemail call is verified by this test suite. Beep
-  frequencies and answering behavior vary; classification can be wrong.
-
-## Unverified and limitations
-
-- Inbound/outbound calls across arbitrary carriers, NATs and routers.
-- Security hardening, broad SIP fuzzing, or a certified SBC.
-- Human transfer, warm handoff, or automatic model detach after transfer;
-  see [planned handoff spec](CALL_HANDOFF_SPEC.md).
-- Fully unattended setup on Windows/Linux/macOS; real SIP credentials,
-  networking and Cloudflare provisioning remain manual.
-- Users are responsible for SIP billing, disclosure and consent.
-
-## Safe setup
-
-Read [README](../README.md), [ONBOARDING](ONBOARDING.md) and
-[SECURITY](../SECURITY.md). Run the guided check and wizard from the README.
-No setup check dials a phone number.
-
-The source has no affiliation or endorsement from OpenAI, Codex or AgentPhone.
-
-## Offline checks
-
-Install the Python dependencies in an isolated environment, then run the
-Python unittest files, the Node Worker test, and the release audit per README.
-
-## Attribution
-
-PhoneDex is MIT licensed with attribution to Hermes Talk preserved in
-[THIRD_PARTY_NOTICES](../THIRD_PARTY_NOTICES.md) and the upstream license.
+PhoneDex is MIT-licensed with upstream attribution preserved in
+[THIRD_PARTY_NOTICES](../THIRD_PARTY_NOTICES.md). It is **not affiliated with
+or endorsed by** OpenAI, Codex, or AgentPhone.
