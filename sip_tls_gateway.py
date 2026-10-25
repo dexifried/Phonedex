@@ -436,8 +436,9 @@ class SipsGateway:
                         self.model.opts.on_media_idle=lambda: self._on_inbound_media_idle(call,writer)
                         if self.shadow_observer is not None:
                             self.shadow_observer.start()
-                        self.model.opts.call_control=CallEventFanout(
-                            self.transcript_capture,self.shadow_observer)
+                        self.model.opts.call_control=(
+                            CallEventFanout(self.transcript_capture,self.shadow_observer)
+                            if self.shadow_observer is not None else self.transcript_capture)
                         self.model.activate_inbound(self.opts.media_port)
         except (OSError,ConnectionError) as exc:
             LOG.warning('SIP signaling transport closed (%s)',type(exc).__name__)
