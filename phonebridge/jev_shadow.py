@@ -13,7 +13,7 @@ from pathlib import Path
 import re
 import time
 from urllib.parse import urlsplit
-from urllib.request import Request, urlopen
+from urllib.request import Request, HTTPRedirectHandler, build_opener
 
 LOG = logging.getLogger("phonedex.jev-shadow")
 CALL_ID = re.compile(r"^call_[a-f0-9]{32}$")
@@ -70,6 +70,13 @@ def validated_result(value: object) -> dict:
     }
 
 
+class _NoRedirect(HTTPRedirectHandler):
+    """Never let a local Jev endpoint redirect call text to another host."""
+
+    def redirect_request(self, request, fp, code, msg, headers, newurl):
+        return None
+
+
 class CallEventFanout:
     """Forward the same normalized event to transcript capture and Jev."""
 
@@ -101,6 +108,8 @@ class JevShadowObserver:
         self.events: list[dict] = []
         self.seen: set[str] = set()
         self.latest: dict | None = None
+        self.state_history: list[dict] = []
+        self.final_audit_succeeded = False
         self.error: str | None = None
         self.overflow = False
         self._changed = asyncio.Event()
@@ -166,7 +175,7 @@ class JevShadowObserver:
         if self.api_key:
             headers["Authorization"] = "Bearer " + self.api_key
         request = Request(self.url, data=data, headers=headers, method="POST")
-        with urlopen(request, timeout=self.timeout) as response:
+        with build_opener(_NoRedirect()).open(request, timeout=self.timeout) as response:
             body = response.read(256001)
         if len(body) > 256000:
             raise ValueError("Oversized Jev response")
@@ -194,6 +203,12 @@ class JevShadowObserver:
             self.latest = result
             self.error = None
             self._processed_count = len(snapshot)
+            if final:
+                self.final_audit_succeeded = True
+            state = result["call_state"]
+            if not self.state_history or self.state_history[-1]["state"] != state:
+                self.state_history.append({
+                    "at": datetime.now(timezone.utc).isoformat(), "state": state})
 
     async def _watch(self) -> None:
         try:
@@ -229,7 +244,8 @@ class JevShadowObserver:
             "finished_at": datetime.now(timezone.utc).isoformat() if self._closed else None,
             "call_status": call_status, "transcript_fragments_seen": len(self.events),
             "full_transcript_processed": not self.overflow and
-                self._processed_count == len(self.events) and self.latest is not None,
+                self.final_audit_succeeded and self._processed_count == len(self.events),
+            "state_history": self.state_history,
             "observer_error": self.error, "advisory_only": True,
             "result": self.latest,
         }
