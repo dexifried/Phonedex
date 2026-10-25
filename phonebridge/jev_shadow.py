@@ -15,6 +15,7 @@ import time
 from urllib.parse import urlsplit
 from urllib.request import Request, HTTPRedirectHandler, build_opener
 from phonebridge.shadow_decisions import run_backend
+from phonebridge.jev_windows_vault import load_jev_research_key_locally
 
 LOG = logging.getLogger("phonedex.jev-shadow")
 CALL_ID = re.compile(r"^call_[a-f0-9]{32}$")
@@ -139,8 +140,12 @@ class JevShadowObserver:
                 url = "https://api.typesafe.ai/v1/systemone"
                 api_key = os.environ.get("TYPESAFE_API_KEY") or os.environ.get(
                     "PHONEDEX_JEV_SHADOW_API_KEY", "")
+                if not api_key and os.environ.get("PHONEDEX_JEV_USE_JEVRESEARCH_VAULT") == "1":
+                    # Unlocked by the same Windows user within PhoneDex. No secret
+                    # is read by the remote PC connector or written to an .env file.
+                    api_key = load_jev_research_key_locally()
                 if not api_key:
-                    raise ValueError("Missing TYPESAFE_API_KEY")
+                    raise ValueError("Missing TYPESAFE_API_KEY or opt-in local DPAPI vault")
                 model = os.environ.get("PHONEDEX_JEV_SHADOW_MODEL") or "jev-latest"
             else:
                 url, api_key, model = "", "", "rules"
@@ -152,7 +157,7 @@ class JevShadowObserver:
                        timeout=float(os.environ.get("PHONEDEX_JEV_SHADOW_TIMEOUT", "5")),
                        api_key=api_key,
                        data_dir=root / "jev-shadow")
-        except (ValueError, OverflowError) as exc:
+        except (ValueError, OverflowError, RuntimeError) as exc:
             LOG.warning("Jev shadow unavailable: %s", type(exc).__name__)
             return None
 
