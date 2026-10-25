@@ -90,7 +90,7 @@ class ObserverTests(unittest.IsolatedAsyncioTestCase):
             persisted = json.loads((Path(temp) / (ID + ".json")).read_text())
             self.assertEqual(persisted["call_id"], ID)
             self.assertNotIn("dialogue", persisted)
-            self.assertNotIn("transcript", persisted)
+            self.assertNotIn("How much?", json.dumps(persisted))
 
     async def test_dedup_does_not_depend_on_transcript_storage(self):
         monitor = JevShadowObserver(ID, "Goal", url="http://localhost/v1/chat/completions")
