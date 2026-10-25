@@ -86,6 +86,7 @@ class ObserverTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(snapshots[-1][0][0]["text"], "How much?")
             self.assertTrue(report["full_transcript_processed"])
             self.assertTrue(report["advisory_only"])
+            self.assertEqual(report["state_history"][0]["state"], "completed")
             self.assertEqual(report["result"]["goals"][0]["answer"], "$103")
             persisted = json.loads((Path(temp) / (ID + ".json")).read_text())
             self.assertEqual(persisted["call_id"], ID)
@@ -111,6 +112,16 @@ class ObserverTests(unittest.IsolatedAsyncioTestCase):
         monitor.on_live_event({"type": "session.input_transcript.delta", "delta": "Hi"})
         with patch.object(monitor, "_request", side_effect=TimeoutError("unavailable")):
             result = await monitor.finish()
+        self.assertFalse(result["full_transcript_processed"])
+        self.assertEqual(result["observer_error"], "TimeoutError")
+
+    async def test_failed_final_audit_cannot_reuse_old_success(self):
+        observer = JevShadowObserver(ID, "Goal", url="http://localhost/v1/chat/completions")
+        observer.on_live_event({"type": "session.input_transcript.delta", "delta": "Hi"})
+        with patch.object(observer, "_request", return_value=validated_result(ANSWER)):
+            await observer._analyze(False)
+        with patch.object(observer, "_request", side_effect=TimeoutError("no model")):
+            result = await observer.finish()
         self.assertFalse(result["full_transcript_processed"])
         self.assertEqual(result["observer_error"], "TimeoutError")
 
