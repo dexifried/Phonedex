@@ -129,12 +129,13 @@ def deterministic_decisions(events: list[dict], goal: str = "") -> dict:
     complete = bool(COMPLETE.search(human))
     retry = state == "voicemail"
     unanswered = not complete
-    result = {"call_state": {"value": state, "confidence": 1.0,
-                             "probabilities": {k: float(k == state) for k in CHOICES}}}
+    # Rules are hard classifications, NOT calibrated probabilities.
+    result = {"call_state": {"value": state, "confidence": None,
+                             "probabilities": {}}}
     for name, answer in (("goal_complete", complete), ("handoff_requested", handoff),
                          ("retry_needed", retry), ("questions_unanswered", unanswered)):
-        result[name] = {"value": answer, "confidence": 1.0,
-                        "probability_yes": 1.0 if answer else 0.0}
+        result[name] = {"value": answer, "confidence": None,
+                        "probability_yes": None}
     return result
 
 
