@@ -96,7 +96,8 @@ Do not claim success until the relevant checks actually pass.
 - Optional Worker control routes for dispatch, status, transcripts, private steering, command acknowledgements, and hangup.
 - Normal and business prompt modes. Business mode can read a local profile and a read-only calendar snapshot. It does not book appointments or send messages.
 - Default-deny outbound recipient allowlisting, per-day call limits, a one-call concurrency limit, and separate operator and gateway bearer secrets.
-- Transcript normalization, duplicate suppression across event sources, and retries for failed Worker transcript uploads.
+- **Privacy-controlled transcripts:** choose `off` (default), `local`, `worker`, or `both`. Local SQLite keeps conversation text on your own machine; Worker/KV transcript export is explicitly opt-in. Remote call control continues to work without transcript upload.
+- Transcript normalization, duplicate suppression across event sources, and retries for failed Worker transcript uploads when enabled.
 - Optional **AgentPhone Calls dashboard transcript sync** for inbound calls, using the caller number and timestamp to match exactly one completed provider record. Disabled unless explicitly configured.
 
 ### Experimental or not verified
@@ -124,7 +125,22 @@ Human transfer is **not implemented**. The [handoff document](docs/CALL_HANDOFF_
   <img src="assets/branding/architecture.svg" alt="Phone carrier audio flows through the PhoneDex SIP/TLS gateway, RTP bridge, and GPT Live. Remote call control flows through Cloudflare Worker and KV to the local controller." width="100%">
 </p>
 
-The Worker handles call instructions and text metadata. It does not receive raw audio or SIP credentials. Transcript text may be stored in KV for up to 24 hours.
+The Worker handles call instructions and text metadata. It does not receive raw audio or SIP credentials. **Transcript text is not sent to Workers KV by default**; `PHONEDEX_TRANSCRIPT_MODE=worker` or `both` enables it. Phone numbers, dial prompts, status and command metadata still go to the Worker when remote control is used.
+
+### Self-hosted transcript privacy
+
+PhoneDex makes conversation-text retention an explicit choice:
+
+| `PHONEDEX_TRANSCRIPT_MODE` | Save transcripts locally | Send transcripts to Workers KV |
+| --- | --- | --- |
+| `off` (default) | No | No |
+| `local` | Yes, SQLite | No |
+| `worker` | No | Yes |
+| `both` | Yes | Yes |
+
+In `local` mode, inbound and outbound GPT Live text is written under `PHONEDEX_DATA_DIR` (default `~/.phonedex/transcripts.sqlite3`) and can be listed or deleted locally. Configurable retention defaults to 7 days; expired records are pruned on writes or manual cleanup. **The local database is plaintext**, so protect your machine and backups.
+
+The optional AgentPhone Calls dashboard export is independently disabled by default. This does not hide call media from the SIP provider or GPT Live: both still process the call. See [Transcript privacy and local storage](docs/TRANSCRIPT_PRIVACY.md) for exact data boundaries, security limitations and deletion commands.
 
 ## Quickstart
 
@@ -134,7 +150,7 @@ The Worker handles call instructions and text metadata. It does not receive raw 
 - Codex CLI logged into a ChatGPT account that can access the required session.
 - A SIP provider configured for TLS signaling, PCMU, and SDES-SRTP. Public inbound use also needs a trusted certificate, source-IP allowlisting, and reachable UDP media port.
 - Node.js for the Worker tests and Wrangler CLI. Use a currently supported Node.js release for Wrangler.
-- A Cloudflare account and Workers KV namespace only if you want remote agent controls.
+- A Cloudflare account and Workers KV namespace only if you want remote agent controls. Remote transcript uploads are disabled by default.
 
 PhoneDex has not been verified across arbitrary SIP providers. A dry run and the offline test suites do not make a real call.
 
@@ -310,6 +326,7 @@ The [roadmap and release review](docs/RELEASE_STATUS.md) records current verific
 
 ## Documentation
 
+- [Transcript privacy and local storage](docs/TRANSCRIPT_PRIVACY.md) — local SQLite, no-retention mode, remote transcript opt-in, data flow and deletion.
 - [Guided setup and readiness checks](docs/ONBOARDING.md) — interactive local configuration, remote control options, and remaining manual steps.
 - [AgentPhone credit savings](docs/AGENTPHONE_CREDIT_SAVINGS.md) — measured 90.9% outbound and 98.3% inbound AgentPhone charge reductions, with an anonymized transaction ledger.
 - [Technical notes](docs/TECHNICAL_NOTES.md) — media, control, authentication, and data boundaries.

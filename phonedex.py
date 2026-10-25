@@ -22,6 +22,7 @@ def load_config():
 
 def doctor():
     from phonebridge.subscription_live import oauth_check
+    from harness.transcript_store import transcript_mode, retention_days
     missing_deps=[p for p in ("aiortc","av","pylibsrtp","websockets") if importlib.util.find_spec(p) is None]
     print("PYTHON_DEPENDENCIES="+("ok" if not missing_deps else "missing:"+",".join(missing_deps)))
     print("PROJECT=Phonedex;BY=Dexifyz")
@@ -42,6 +43,15 @@ def doctor():
     print("MEDIA_PORT_FORWARDED="+str(os.environ.get("PHONEDEX_MEDIA_PORT_FORWARDED")=="1"))
     allow=[a.strip() for a in os.environ.get("PHONEDEX_ALLOWED_RECIPIENTS","").split(",") if a.strip()]
     print("ALLOWED_RECIPIENT_COUNT="+str(len(allow)))
+    try:
+        privacy_mode=transcript_mode()
+        print("TRANSCRIPT_DESTINATION="+privacy_mode)
+        if privacy_mode in ("local","both"):
+            print("TRANSCRIPT_LOCAL_RETENTION_DAYS="+str(retention_days()))
+    except ValueError:
+        print("TRANSCRIPT_DESTINATION=invalid_configuration")
+    print("AGENTPHONE_TRANSCRIPT_SYNC="+
+          ("enabled" if os.environ.get("PHONEDEX_AGENTPHONE_TRANSCRIPTS_ENABLED")=="1" else "off"))
     print("SECRETS_ARE_NEVER_DISPLAYED")
 
 def dial(opts):

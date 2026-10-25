@@ -150,7 +150,15 @@ class TranscriptCapture:
         if len(self._events) >= MAX_FRAGMENTS:
             self.overflowed = True
             return
-        self._events.append({"speaker": speaker, "text": fragment})
+        offset = event.get("end_ms", event.get("start_ms", 0))
+        if not isinstance(offset, (int,float)):
+            offset = 0
+        self._events.append({"speaker": speaker, "text": fragment,
+                             "ms": max(0,min(3600000,int(offset)))})
+
+    def copy_for_local(self):
+        """Return a bounded copy before provider normalization clears the buffer."""
+        return [dict(item) for item in self._events] if not self.closed else []
 
     def close(self):
         self.closed = True

@@ -18,6 +18,13 @@ class FakeGateway:
  def poll(self,active=None): return {"calls":[],"actions":[]}
 
 class ControllerTests(unittest.IsolatedAsyncioTestCase):
+ def setUp(self):
+  # Legacy transcript tests deliberately opt into cloud transcript delivery.
+  # Production defaults to off; tests must not imply automatic upload.
+  patcher=patch.dict("os.environ",{"PHONEDEX_TRANSCRIPT_MODE":"worker"})
+  patcher.start()
+  self.addCleanup(patcher.stop)
+
  async def test_call_state_hangup_and_transcript(self):
   gw=FakeGateway()
   req={"call_id":"call_"+"1"*32,"mode":"normal","to":"+12025550123",

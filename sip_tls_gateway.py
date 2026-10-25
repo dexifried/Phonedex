@@ -22,6 +22,7 @@ import os
 from pathlib import Path
 import re
 import secrets
+import sqlite3
 import ssl
 import sys
 from dataclasses import dataclass
@@ -36,6 +37,7 @@ from phonebridge.audio import RTPPacket
 from phonebridge.agentphone_transcripts import (
     AgentPhonePublisher, TranscriptCapture, from_sip_identity,
 )
+from harness.transcript_store import LocalTranscriptStore, local_enabled
 
 LOG=logging.getLogger('phonedex-sip-tls')
 MAX_HEADERS=8192
@@ -181,6 +183,9 @@ class SipsGateway:
         self.transcript_capture=None
         self.transcript_from=None
         self.transcript_started=None
+        self.local_transcript_id=None
+        self.local_transcript_store=(LocalTranscriptStore()
+                                     if getattr(args,'backend','echo')=='subscription' and local_enabled() else None)
         self.transcript_tasks=set()
 
     def allowed(self,address):
@@ -197,14 +202,31 @@ class SipsGateway:
         captured=self.transcript_capture
         caller=self.transcript_from
         started=self.transcript_started
+        local_id=self.local_transcript_id
         self.transcript_capture=None
         self.transcript_from=None
         self.transcript_started=None
+        self.local_transcript_id=None
         self.model.opts.on_media_idle=None
         await self.model.reset_call()
         self.model.opts.call_control=None
         if captured is not None:
+            local_items=captured.copy_for_local() if self.local_transcript_store is not None else []
             turns=captured.close()
+            if self.local_transcript_store is not None and local_id and started and local_items:
+                # Keep sensitive text on the operator's machine. Local writes
+                # happen outside SIP teardown; they never block carrier BYE.
+                # The fresh random ID is unrelated to the provider SIP Call-ID.
+                async def save_local():
+                    try:
+                        await asyncio.to_thread(
+                            self.local_transcript_store.append,local_id,'inbound',
+                            started,0,local_items[:2000])
+                    except (OSError,ValueError,RuntimeError,sqlite3.Error) as exc:
+                        LOG.warning('Local inbound transcript save failed (%s)',type(exc).__name__)
+                task=asyncio.create_task(save_local())
+                self.transcript_tasks.add(task)
+                task.add_done_callback(self.transcript_tasks.discard)
             if self.transcript_publisher is not None and caller and started and turns:
                 # Best-effort independent background upload. Never stall SIP
                 # response, BYE, or model/audio cleanup on an HTTPS request.
@@ -309,14 +331,17 @@ class SipsGateway:
                                 self.signal_writer=writer
                                 self.signal_headers=dict(h)
                                 caller=from_sip_identity(h.get('from'))
-                                if self.transcript_publisher is not None and caller:
+                                if self.transcript_publisher is not None or self.local_transcript_store is not None:
                                     self.transcript_capture=TranscriptCapture()
-                                    self.transcript_from=caller
+                                    self.transcript_from=caller if self.transcript_publisher is not None else None
                                     self.transcript_started=datetime.now(timezone.utc).isoformat()
+                                    self.local_transcript_id=('call_'+secrets.token_hex(16)
+                                                              if self.local_transcript_store is not None else None)
                                 else:
                                     self.transcript_capture=None
                                     self.transcript_from=None
                                     self.transcript_started=None
+                                    self.local_transcript_id=None
                                 if self.media is not None:
                                     self.media.accepted=0;self.media.returned=0
                                 key64=base64.b64encode(local_key).decode('ascii')

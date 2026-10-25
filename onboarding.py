@@ -22,6 +22,7 @@ ENV_ORDER = (
     "PHONEDEX_SIP_USERNAME", "PHONEDEX_SIP_PASSWORD",
     "PHONEDEX_ALLOWED_RECIPIENTS", "PHONEDEX_MAX_CALLS_PER_DAY",
     "PHONEDEX_GATEWAY_URL", "PHONEDEX_GATEWAY_TOKEN",
+    "PHONEDEX_TRANSCRIPT_MODE", "PHONEDEX_TRANSCRIPT_RETENTION_DAYS",
 )
 
 
@@ -202,6 +203,10 @@ def run_setup(root: Path, mode: str, *, input_fn=input) -> bool:
             "PHONEDEX_SIP_PASSWORD": _ask("SIP password (hidden)", checked_field, secret=True),
             "PHONEDEX_ALLOWED_RECIPIENTS": _ask("Approved outbound recipients (comma-separated E.164)", approved_recipients, input_fn=input_fn),
             "PHONEDEX_MAX_CALLS_PER_DAY": "12",
+            # Privacy-first defaults. Users can explicitly opt into local
+            # SQLite or Worker transcripts in their private .env later.
+            "PHONEDEX_TRANSCRIPT_MODE": "off",
+            "PHONEDEX_TRANSCRIPT_RETENTION_DAYS": "7",
         }
         if mode == "remote":
             print("Remote agent control requires a separately deployed Cloudflare Worker.")
@@ -210,6 +215,7 @@ def run_setup(root: Path, mode: str, *, input_fn=input) -> bool:
         created = save_env(root, values)
         print(f"Configuration saved to {created.name}. No real calls or deployments made.")
         print("NEXT: install dependencies, run codex login, manually verify UDP forwarding.")
+        print("Transcript text is OFF by default; see docs/TRANSCRIPT_PRIVACY.md for local-only storage.")
         if mode == "remote":
             print("NEXT: deploy your own Worker, set AGENT_CONTROL_TOKEN and VOICE_GATEWAY_TOKEN.")
             print("      VOICE_GATEWAY_TOKEN must match PHONEDEX_GATEWAY_TOKEN in .env.")

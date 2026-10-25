@@ -11,6 +11,7 @@ import logging
 import os
 from pathlib import Path
 import re
+import sqlite3
 import subprocess
 import sys
 import time
@@ -19,6 +20,7 @@ from collections import deque
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT));sys.path.insert(0,str(ROOT/"vendor"))
 from harness.agent_client import AgentGatewayClient
+from harness.transcript_store import LocalTranscriptStore, transcript_mode
 from sip_outbound import dial
 from phonebridge.agentphone_trunk import status as trunk_status
 
@@ -57,6 +59,10 @@ class CallControl:
         self.handled:set[str]=set()
         self.pending=deque()
         self.received=deque()
+        self.local_received=deque()
+        self.transcript_destination=transcript_mode()
+        self.local_store=(LocalTranscriptStore() if self.transcript_destination in ('local','both') else None)
+        self.local_saved_deltas=0
         self.batch=0
         self.events_seen=set()
         self.event_order=deque()
@@ -106,14 +112,23 @@ class CallControl:
             speaker="caller" if typ=="session.input_transcript.delta" else "assistant"
             ms=event.get("end_ms",event.get("start_ms",0))
             if not isinstance(ms,(int,float)):ms=0
-            self.received.append({"speaker":speaker,"ms":max(0,min(3600000,int(ms))),"text":fragment})
+            if self.transcript_destination == 'off':
+                return   # No transcript persistence or remote upload.
+            item={"speaker":speaker,"ms":max(0,min(3600000,int(ms))),"text":fragment}
+            if self.transcript_destination in ('worker','both'):
+                self.received.append(item)
+            if self.local_store is not None:
+                self.local_received.append(item)
             self.received_deltas+=1
             if self.received_deltas==1:
                 LOG.info("First GPT Live transcript fragment captured; speaker=%s",speaker)
-            # Backpressure: bound in-memory history, but log overflow instead of silently clearing.
+            # Backpressure is bounded independently for local and cloud queues.
             if len(self.received)>2000:
-                LOG.warning("Transcript backlog exceeded 2000; reducing oldest backlog")
+                LOG.warning("Remote transcript backlog exceeded 2000; dropping oldest fragment")
                 self.received.popleft()
+            if len(self.local_received)>2000:
+                LOG.warning("Local transcript backlog exceeded 2000; dropping oldest fragment")
+                self.local_received.popleft()
         elif typ=="session.instructions.appended":
             command_id=event.get("client_event_id")
             if isinstance(command_id,str) and CMD.fullmatch(command_id):
@@ -156,6 +171,18 @@ class CallControl:
         while self.pending:
             ident,state,error=self.pending.popleft()
             await self.command_ack(ident,state,error)
+        while self.local_received and self.local_store is not None:
+            items=list(self.local_received)[:40]
+            try:
+                await asyncio.to_thread(
+                    self.local_store.append, self.id, 'outbound', self.started,
+                    self.local_saved_deltas, items)
+            except (OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+                LOG.warning("Local transcript storage failed: %s",type(exc).__name__)
+                break
+            else:
+                for _ in items:self.local_received.popleft()
+                self.local_saved_deltas+=len(items)
         while self.received:
             # A predictable sequence number is essential for retry idempotence.
             batch=list(self.received)[:40]
@@ -247,9 +274,10 @@ class Controller:
             await session.status("failed",type(exc).__name__)
         finally:
             await session.flush()
-            LOG.info("TRANSCRIPT_DIAG captured=%d published=%d queued=%d failures=%d call_mode=%s",
-                     session.received_deltas,session.delivered_deltas,len(session.received),
-                     session.failed_uploads,session.mode)
+            LOG.info("TRANSCRIPT_DIAG captured=%d local_saved=%d worker_published=%d pending_local=%d pending_worker=%d failures=%d call_mode=%s transcript_mode=%s",
+                     session.received_deltas,session.local_saved_deltas,session.delivered_deltas,
+                     len(session.local_received),len(session.received),
+                     session.failed_uploads,session.mode,session.transcript_destination)
             try:await self.run_nat("Remove")
             except (RuntimeError,OSError,subprocess.TimeoutExpired):LOG.warning("Outbound mapping cleanup failed")
             self.active=None
