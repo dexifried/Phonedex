@@ -1,78 +1,119 @@
-# Jev full-call shadow observer (experimental)
+# PhoneDex call-shadow backends (experimental)
 
-PhoneDex can run Jev as a **silent observer of the entire conversation**.
-GPT Live still speaks. Jev has no control over SIP, audio playback, dialing,
-hangups, transfers, or GPT Live steering. Its recommendations are advisory.
+PhoneDex can shadow-monitor the **entire text transcript** of each GPT Live
+call, without sharing the audio path. Every snapshot includes the conversation
+from the beginning. The shadow is advisory: it never transfers, dials, steers
+GPT Live, or hangs up calls. It monitors both inbound and outbound calls.
 
-## Features
+## Important API distinction
 
-- Separate in-memory Jev observer for each inbound or outbound SIP call.
-- Subscribes to caller and GPT Live text transcript events. It receives the
-  complete conversation as events arrive, **not raw audio** or carrier states.
-- Every inference is given **the whole transcript from the start of the call**.
-  A final full-call audit runs after the call ends.
-- Tracks conversation state, goals and evidence, unanswered questions, human
-  handoff requests, and suggestions to wrap up or retry.
-- Runs off the audio path; Jev inference failure does not interrupt telephony.
-- Reports an incomplete audit rather than silently truncating transcripts that
-  exceed 5,000 events.
+**TypeSafe Jev and Jared Palmer's Kev models are decision models, NOT chat
+completion generators.** Both expose `POST /v1/systemone` with `state` and
+typed `questions` (`choice`, `noul`, `score`). The prior chat/completions
+prototype was incompatible and has been replaced. Their responses contain
+probabilities, not free-form factual summaries or price extraction. Our
+structured outputs contain classifications, pending goals and confidence,
+but MUST NOT pretend to extract verbatim answers automatically.
 
-## Enable (off by default)
+## Choose a backend
 
-Requires a running Jev service exposing an OpenAI-compatible nonstreaming
-chat-completions endpoint. PhoneDex does not include a Jev model or server.
+| Mode | Backend | Hardware / credentials |
+| --- | --- | --- |
+| `rules` | CPU-only deterministic regex state classifier | no model or API key |
+| `kev` | Local Kev-4B, Kev-0.8B or other compatible serving checkpoint | local System One endpoint |
+| `jev` | Hosted TypeSafe Jev | TypeSafe API key (bring your own) |
 
-Set the environment variables in the outbound controller or inbound gateway:
+Kev-4B's maintained model card recommends approximately 16 GB of available
+GPU RAM for CUDA. Kev-0.8B can run on a 4 GB GPU but has lower published
+out-of-domain accuracy. Kev is open-source Apache-2.0; PhoneDex DOES NOT
+bundle Kev weights or license an external model automatically.
+
+Enable the observer only in a process whose calls are authorized to be
+transcribed and evaluated. For all backends:
 
     PHONEDEX_JEV_SHADOW_ENABLED=1
-    PHONEDEX_JEV_SHADOW_URL=http://127.0.0.1:1234/v1/chat/completions
-    PHONEDEX_JEV_SHADOW_MODEL=jev
+    PHONEDEX_JEV_SHADOW_BACKEND=rules
 
-The URL is illustrative, **not a discovered or verified Jev endpoint**.
-Configure the correct URL and model name for your own deployment.
+For hosted Jev set `PHONEDEX_JEV_SHADOW_BACKEND=jev` and `TYPESAFE_API_KEY` in
+your process environment. The HTTPS endpoint is fixed at
+`https://api.typesafe.ai/v1/systemone`, model `jev-latest` by default.
+PhoneDex never includes a shared TypeSafe key.
 
-Optional variables:
+For local Kev:
 
-    PHONEDEX_JEV_SHADOW_API_KEY=
-    PHONEDEX_JEV_SHADOW_INTERVAL=6
-    PHONEDEX_JEV_SHADOW_TIMEOUT=5
-    PHONEDEX_JEV_SHADOW_ALLOW_REMOTE=0
-    PHONEDEX_DATA_DIR=
+    PHONEDEX_JEV_SHADOW_BACKEND=kev
+    PHONEDEX_JEV_SHADOW_URL=http://127.0.0.1:8009/v1/systemone
+    PHONEDEX_JEV_SHADOW_MODEL=kev-latest
 
-The default 6-second interval debounces transcript chunks; values from 1 to
-30 seconds are allowed. Timeout is bounded to 1–10 seconds.
+Start Kev from `https://github.com/jaredpalmer/kev` following the project's
+instructions. Requires Python 3.12/3.13 and `uv` in the Kev environment.
+Example (in Kev repo):
 
-Only loopback HTTP(S) endpoints are accepted by default. Explicitly setting
-PHONEDEX_JEV_SHADOW_ALLOW_REMOTE=1 permits a remote HTTPS model endpoint.
-This transmits your conversation text to that server; never enable it without
-appropriate privacy safeguards. Nonlocal HTTP is rejected.
+    uv sync --extra serve
+    uv run --extra serve python -m kev.serve --run jaredpalmer/kev-4b@v1.0 --port 8009
 
-## Privacy and reports
+Smaller local alternative: replace the run argument with
+`jaredpalmer/kev-0.8b@v1.0`. Kev-4B may not fit a GPU with 8 GB VRAM;
+hardware benchmarks must measure load time and VRAM as well as inference.
 
-**Enabling Jev sends call transcript text to the configured model endpoint
-even when PHONEDEX_TRANSCRIPT_MODE=off.** These are deliberately separate,
-opt-in processing controls. Obtain applicable consent and disclose any
-transcription/processing. This observer does not record raw audio.
+`PHONEDEX_JEV_SHADOW_API_KEY` optionally sets a bearer token for a local
+Kev server with `KEV_API_KEY` configured, or for Jev if `TYPESAFE_API_KEY`
+is not set. Never commit keys or include them in dashboard HTML.
 
-A local report with call status, structured findings, and evidence excerpts is
-written to PHONEDEX_DATA_DIR/jev-shadow/call_<id>.json. It does **not** include
-the complete raw transcript, but the findings may contain sensitive data.
-Reports are automatically pruned after seven days when another report is saved.
-Protect local files according to your operating system's access controls.
-This code does not upload any Jev report to Cloudflare.
+Settings `PHONEDEX_JEV_SHADOW_INTERVAL=6` and
+`PHONEDEX_JEV_SHADOW_TIMEOUT=5` control snapshot debounce and request
+timeout. Only local Kev HTTP(S) is accepted by default. Explicit
+`PHONEDEX_JEV_SHADOW_ALLOW_REMOTE=1` allows a remote HTTPS Kev endpoint;
+that uploads call text to the configured server. HTTP redirects are blocked.
 
-The observer object persists per call. If the Jev inference server itself is
-stateless, each request replays all prior transcript fragments to preserve
-whole-call context. This is not a persistent provider-side Jev session.
+## Behavior and limitations
 
-Jev's labels (including voicemail, IVR, and hold) are text-model inferences,
-not carrier-verified detections. The shadow cannot transfer, hang up, redial,
-or steer GPT Live. Such behavior requires a separate, authorized task policy.
+- Every Jev/Kev request replays the full conversation and asks the SAME five
+  typed questions: current call state; overall goal complete; human handoff
+  requested; retry needed; and unanswered questions.
+- Decision probabilities are retained in local reports, together with
+  recommendation, call state history, and the final audit status.
+- Only probability >=0.72 counts as positive. Probability <=0.28 counts
+  as negative; other results abstain (unverified).
+- The deterministic engine does not provide calibrated model probabilities.
+  Its confidence value represents a rule firing, **not measured reliability**.
+- The deterministic baseline uses regular-expression patterns, and can
+  mistake normal mentions of voicemail or hold for actual call states.
+- No backend extracts prices, check-in times or other arbitrary values
+  reliably here yet: goals are high-level states and proposed next actions.
+- Jev/Kev may decline oversized state inputs; those calls receive an
+  incomplete final audit, not a silently truncated report. Kev-4B's
+  validated context for consistent accuracy is around 8,192 tokens, so
+  long-call performance requires separate measurement.
+- The observer cannot see tone, interruptions, hold music or raw SIP events
+  unless future dedicated audio/event integrations are built.
+- Reports are saved under `PHONEDEX_DATA_DIR/jev-shadow` and pruned after
+  seven days upon the next saved report; protect them appropriately.
 
-## Testing
+**Privacy:** enabling any shadow mode processes call text even if
+`PHONEDEX_TRANSCRIPT_MODE=off`. `jev` sends text to TypeSafe; `kev` sends it
+to the configured local/remote server; `rules` processes it locally only.
+Get informed consent as applicable. The feature is OFF unless enabled.
 
-    python -m unittest test_jev_shadow
+## Benchmark apples-to-apples
 
-Offline tests use a mocked Jev model, not the telephone network. Live Jev
-operation requires verifying the endpoint and running a separate authorized
-test call. Do not deploy based solely on the mock tests.
+Run deterministic baseline with synthetic labeled development cases:
+
+    python scripts/bench_shadow.py --backends rules
+
+Run all three only after explicitly configuring Jev credentials and Kev:
+
+    python scripts/bench_shadow.py --backends rules,kev,jev --output results.json
+
+The harness reports per-question correct / incorrect / abstained, coverage,
+and request latency p50/p95. It uses identical cases for every backend.
+**Current sample transcripts are synthetic and development-labeled, not
+held-out real calls. Do not present their results as production accuracy.**
+
+Next research step: obtain consented real-call transcripts, label with
+independent adjudication, freeze train/dev/test splits, then compare
+accuracy, false-positive human transfers, missed voicemail, coverage,
+confidence calibration, latency, throughput, cost and memory requirements.
+
+An offline unit test suite and benchmark smoke run are included in CI.
+Live Jev or Kev inference has not been verified in this PR.
