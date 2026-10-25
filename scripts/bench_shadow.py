@@ -85,7 +85,9 @@ def main(argv=None):
                         help="comma-separated: rules,kev,jev (default rules only)")
     parser.add_argument("--kev-url", default="http://127.0.0.1:8009/v1/systemone")
     parser.add_argument("--kev-model", default="kev-latest")
-    parser.add_argument("--jev-model", default="jev-latest")
+    parser.add_argument("--jev-model", default="jev-1.14.0")
+    parser.add_argument("--use-jevresearch-vault", action="store_true",
+                        help="explicitly reuse the current Windows user's encrypted JevResearch credential")
     parser.add_argument("--timeout", type=float, default=10.0)
     parser.add_argument("--output", type=Path, help="optional output JSON report path")
     args = parser.parse_args(argv)
@@ -98,8 +100,15 @@ def main(argv=None):
         endpoint, key, model = "", "", ""
         if name == "jev":
             key = os.environ.get("TYPESAFE_API_KEY", "")
+            if not key and args.use_jevresearch_vault:
+                # Local-only DPAPI decryption. Never print or serialize this key.
+                from phonebridge.jev_windows_vault import load_jev_research_key_locally
+                try:
+                    key = load_jev_research_key_locally()
+                except RuntimeError:
+                    parser.error("JevResearch DPAPI vault unavailable for this Windows user")
             if not key:
-                parser.error("TYPESAFE_API_KEY required to benchmark hosted Jev")
+                parser.error("Set TYPESAFE_API_KEY or opt into --use-jevresearch-vault")
             endpoint, model = "https://api.typesafe.ai/v1/systemone", args.jev_model
         elif name == "kev":
             endpoint = validated_url(args.kev_url, False)
