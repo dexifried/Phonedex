@@ -26,5 +26,11 @@ build/
 worker/wrangler.toml
 worker/.wrangler/
 worker/node_modules/
+node_modules/
+.superpowers/
+.pytest_cache/
+dashboard/test-results/
+dashboard/playwright-report/
+*.tsbuildinfo
 !harness/business_profile.example.json
 harness/business_profile.json

@@ -73,7 +73,8 @@ def result_to_speech(decision: ToolDecision) -> str:
     return "Could you tell me a little more about your request?"
 
 class DelegationBroker:
-    def __init__(self):
+    def __init__(self,control=None):
+        self.control=control
         self.fragments: deque[tuple[float, str]] = deque(maxlen=1000)
         self.seen: set[str] = set()
 
@@ -117,4 +118,10 @@ class DelegationBroker:
         The voice transcript alone cannot authorize capture_lead; caller consent
         must already be independently confirmed in the backend workflow.
         """
+        if name=='request_profile_field':
+            if (self.control is None or not hasattr(self.control,'request_profile_field') or
+                not isinstance(arguments,dict) or set(arguments)!={'field_id','purpose'}):
+                raise ToolError('A trusted active call and one explicitly authorized field are required')
+            value=self.control.request_profile_field(arguments['field_id'],arguments['purpose'])
+            return {'status':'authorized','value':value}
         return invoke_tool(name, arguments, database=database)

@@ -114,6 +114,7 @@ def main(argv=None) -> int:
     modes=p.add_mutually_exclusive_group()
     modes.add_argument("--check", action="store_true", help="No writes or downloads")
     modes.add_argument("--yes", action="store_true", help="Approve local .venv package setup; not real calls")
+    p.add_argument('--dashboard',action='store_true',help='Also offer installation of the optional local dashboard')
     args=p.parse_args(argv)
     if args.check:
         report()
@@ -123,7 +124,11 @@ def main(argv=None) -> int:
         print("Non-interactive session: use --check or --yes (local installation only).")
         return 2
     try:
-        return 0 if prepare(confirm=(lambda: True) if args.yes else None) else 2
+        ready=prepare(confirm=(lambda: True) if args.yes else None)
+        if ready and args.dashboard:
+            from install_dashboard import install
+            ready=install(confirm=(lambda:True) if args.yes else None)
+        return 0 if ready else 2
     except (KeyboardInterrupt, EOFError):
         print("\nCancelled; no calling/deployment attempted.")
         return 130

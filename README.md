@@ -1,5 +1,11 @@
 # PhoneDex
 
+**Optional Control Centre:** a local React/FastAPI dashboard for call history,
+live events, contacts, task agents, encrypted personal vault and diagnostics.
+Run `python scripts/bootstrap.py --dashboard`, then use your project Python to
+run `phonedex.py dashboard`. See [installation, capabilities and privacy](docs/CONTROL_CENTRE.md).
+It never starts or restarts a gateway automatically.
+
 <p align="center">
   <img src="assets/branding/hero.jpg" alt="PhoneDex — a self-hosted SIP bridge for Codex-authenticated GPT Live." width="100%">
 </p>

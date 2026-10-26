@@ -188,7 +188,7 @@ class SubscriptionLive:
         self.tool_broker = None
         if os.environ.get('PHONEDEX_AGENT_HARNESS') == '1' and getattr(control, 'mode', 'business') == 'business':
             from harness.delegation import DelegationBroker
-            self.tool_broker = DelegationBroker()
+            self.tool_broker = DelegationBroker(control=control)
         self.tool_calls_submitted = 0
         self.tasks = set()
         self.closed = False
@@ -318,6 +318,7 @@ class SubscriptionLive:
                 return
             normalized='session.input_transcript.delta' if typ=='input_transcript.added' else 'session.output_transcript.delta'
             obj={'type':normalized,'event_id':typ+':'+item_id,
+                 'phonedex_completed':True,
                  'delta':fragment,'start_ms':obj.get('start_ms',0),
                  'end_ms':obj.get('end_ms',obj.get('start_ms',0))}
             self.event_counts[source+':'+typ]+=1

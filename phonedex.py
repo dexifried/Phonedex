@@ -98,6 +98,12 @@ def main():
     setup.add_argument("--mode",choices=("local","remote"),default="local",help="local SIP calling or remote Worker control")
     setup.add_argument("--check",action="store_true",help="Read-only readiness checklist; safe for automation")
     sub.add_parser("controller",help="Run the outbound HTTPS polling controller")
+    dashboard=sub.add_parser("dashboard",help="Launch optional local Control Centre (never starts the gateway)")
+    dashboard.add_argument("--host",default="127.0.0.1")
+    dashboard.add_argument("--port",type=int,default=8787)
+    dashboard.add_argument("--headless",action="store_true")
+    dashboard.add_argument("--data-dir",default=None)
+    dashboard.add_argument("--demo",action="store_true")
     dialing=sub.add_parser("dial",help="Dry-run an allowed destination unless --place-call is set")
     dialing.add_argument("--to",required=True)
     dialing.add_argument("--mode",choices=("normal","business"),default="normal")
@@ -111,6 +117,14 @@ def main():
         help="local 24-kHz mono PCM16 WAV to prime GPT Live after answer screening")
     args=p.parse_args()
     if args.action=="doctor":doctor(args.mode)
+    elif args.action=="dashboard":
+        from controlcentre.launch import run_dashboard
+        options=["--host",args.host,"--port",str(args.port)]
+        if args.headless:options.append("--headless")
+        if args.demo:options.append("--demo")
+        if args.data_dir:options.extend(["--data-dir",args.data_dir])
+        try:run_dashboard(options,core_root=ROOT)
+        except ValueError as exc:raise SystemExit(str(exc)) from None
     elif args.action=="setup":
         from onboarding import print_readiness,run_setup
         if args.check:print_readiness(args.mode)

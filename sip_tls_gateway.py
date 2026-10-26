@@ -194,6 +194,8 @@ class SipsGateway:
                                      if getattr(args,'backend','echo')=='subscription' and local_enabled() else None)
         self.transcript_tasks=set()
         self.abuse_guard=InboundAbuseGuard()
+        self.dashboard_control=None
+        self.dashboard_watch=None
 
     def allowed(self,address):
         addr=ipaddress.ip_address(address)
@@ -215,6 +217,16 @@ class SipsGateway:
         self.transcript_from=None
         self.transcript_started=None
         self.local_transcript_id=None
+        monitor=self.dashboard_control
+        watcher=self.dashboard_watch
+        self.dashboard_control=None
+        self.dashboard_watch=None
+        if watcher is not None and watcher is not asyncio.current_task():
+            watcher.cancel()
+            await asyncio.gather(watcher,return_exceptions=True)
+        if monitor is not None:
+            try:await monitor.close('ended')
+            except Exception as exc:LOG.warning('Dashboard cleanup unavailable (%s)',type(exc).__name__)
         self.model.opts.on_media_idle=None
         await self.model.reset_call()
         self.model.opts.call_control=None
@@ -423,6 +435,23 @@ class SipsGateway:
                         call=self.call
                         self.model.opts.on_media_idle=lambda: self._on_inbound_media_idle(call,writer)
                         self.model.opts.call_control=self.transcript_capture
+                        if os.environ.get('PHONEDEX_DASHBOARD_EVENTS')=='1':
+                            try:
+                                from types import SimpleNamespace
+                                from controlcentre.integration import instrument,DashboardControl,TranscriptObserver
+                                observer=instrument(SimpleNamespace(to=from_sip_identity(call.from_header) or '',mode='business'),
+                                                    direction='inbound')
+                                if isinstance(observer,DashboardControl):
+                                    self.dashboard_control=observer.start()
+                                    observer.model=self.model
+                                    self.model.opts.call_control=TranscriptObserver(observer,self.transcript_capture)
+                                    async def watch_dashboard(current_call,monitor,current_writer):
+                                        await monitor.hangup.wait()
+                                        if self.call is current_call:
+                                            await self._terminate_locally(current_call,current_writer)
+                                    self.dashboard_watch=asyncio.create_task(watch_dashboard(call,observer,writer))
+                            except Exception as exc:
+                                LOG.warning('Dashboard monitoring unavailable (%s)',type(exc).__name__)
                         self.model.activate_inbound(self.opts.media_port)
         except (OSError,ConnectionError) as exc:
             LOG.warning('SIP signaling transport closed (%s)',type(exc).__name__)

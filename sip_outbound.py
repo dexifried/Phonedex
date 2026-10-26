@@ -257,18 +257,35 @@ async def dial(opts, control=None):
     voicemail_mode=getattr(opts,'voicemail_mode','auto')
     if voicemail_mode not in ('auto','off'):
         raise ValueError('Invalid voicemail mode')
+    dashboard_control=None
+    if os.environ.get('PHONEDEX_DASHBOARD_EVENTS')=='1':
+        from controlcentre.integration import instrument,DashboardControl
+        control=instrument(opts,control)
+        if isinstance(control,DashboardControl):
+            dashboard_control=control
     screen=VoicemailScreen() if voicemail_mode=='auto' else None
     model_args=argparse.Namespace(backend='subscription',prompt=prompt,idle_seconds=45,
         codex_exe='codex',model_wake_file=opts.model_wake_file,call_control=control,
         outbound_answer_screen=screen)
     model=RTPBridge(model_args)
-    model_socket,_=await loop.create_datagram_endpoint(lambda:model,local_addr=('127.0.0.1',0))
-    gateway.model_port=model_socket.get_extra_info('sockname')[1]
-    media_socket,media_protocol=await loop.create_datagram_endpoint(lambda:SecureMedia(gateway),local_addr=('0.0.0.0',opts.media_port))
+    try:
+        model_socket,_=await loop.create_datagram_endpoint(lambda:model,local_addr=('127.0.0.1',0))
+        gateway.model_port=model_socket.get_extra_info('sockname')[1]
+        try:
+            media_socket,media_protocol=await loop.create_datagram_endpoint(lambda:SecureMedia(gateway),local_addr=('0.0.0.0',opts.media_port))
+        except BaseException:
+            model_socket.close()
+            await model.close()
+            raise
+    except BaseException:
+        if dashboard_control is not None:await dashboard_control.close('failed')
+        raise
+    if dashboard_control is not None:dashboard_control.start()
     writer=None
     greeting_task=None
     screen_task=None
     screen_abort=asyncio.Event()
+    dashboard_outcome='ended'
     try:
         ctx=ssl.create_default_context()
         reader,writer=await asyncio.wait_for(asyncio.open_connection(hostname,port,ssl=ctx,server_hostname=('pstn.agentphone.ai' if hostname.endswith('.pstn.agentphone.ai') else hostname)),15)
@@ -341,6 +358,9 @@ async def dial(opts, control=None):
         if outcome not in ('remote_bye','transport_closed','invalid_signaling'):
             writer.write(request('BYE',uri,headers('BYE','z9hG4bK'+secrets.token_hex(8),dialog)))
             await writer.drain()
+    except BaseException:
+        dashboard_outcome='failed'
+        raise
     finally:
         if screen_task is not None:
             screen_task.cancel()
@@ -359,6 +379,9 @@ async def dial(opts, control=None):
                 await writer.wait_closed()
             except (ssl.SSLError, ConnectionError, OSError) as exc:
                 LOG.warning('Carrier TLS connection closed with shutdown warning: %s',type(exc).__name__)
+        if dashboard_control is not None:
+            try:await dashboard_control.close(dashboard_outcome)
+            except Exception as exc:LOG.warning('Dashboard cleanup unavailable (%s)',type(exc).__name__)
 
 
 def main():

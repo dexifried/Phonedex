@@ -1,0 +1,6 @@
+# Optional; PhoneDex core does not require a dashboard.
+fastapi>=0.115,<1
+uvicorn>=0.30,<1
+cryptography>=44,<51
+# Optional Linux/macOS: install keyring for an OS credential-store backend.
+# Without an OS keyring, use a passphrase through the launcher; never a plain key.
