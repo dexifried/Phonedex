@@ -40,3 +40,10 @@ See CONTROL_CENTRE.md for capability limitations. Automatic transcript schema
 extraction, dashboard retention pruning, autonomous model-selected vault tools,
 carrier billing sync and advanced call controls remain unavailable. Live
 carrier/model interoperability and native Linux execution were not verified.
+
+Transcript presentation groups consecutive fragments from the same speaker into
+readable turns, retaining the first timestamp and stable event ID. Speaker
+changes, system events and pauses longer than eight seconds begin a new turn.
+Grouping happens before phrase search and does not rewrite stored/exported
+records. Synthetic desktop/mobile browser checks cover punctuation, contractions,
+aliases, boundaries, phrase search, pause/resume and updates to an existing turn.

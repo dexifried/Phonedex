@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Phone,
   Search,
@@ -30,6 +30,7 @@ import {
   useAutoScroll,
 } from "../ui";
 import { CallsTable } from "./Overview";
+import { groupTranscript } from "../transcript";
 export type Guard = (action: () => Promise<void>, reason: string) => void;
 export function CallsPage({
   data,
@@ -277,7 +278,9 @@ export function CallDetail({
     [error, setError] = useState(""),
     [message, setMessage] = useState("");
   const transcriptRef = useRef<HTMLDivElement>(null);
-  useAutoScroll(transcriptRef, call.transcript?.length, paused);
+  const turns = useMemo(() => groupTranscript(call.transcript || []), [call.transcript]);
+  const lastTurn = turns.at(-1);
+  useAutoScroll(transcriptRef, `${turns.length}:${lastTurn?.event_id || lastTurn?.id || ""}:${lastTurn?.text || ""}`, paused);
   const active = [
     "active",
     "dialing",
@@ -398,7 +401,7 @@ export function CallDetail({
                 </Button>
               </div>
               <div className="transcript" ref={transcriptRef}>
-                {(call.transcript || [])
+                {turns
                   .filter((t) =>
                     t.text.toLowerCase().includes(query.toLowerCase()),
                   )
