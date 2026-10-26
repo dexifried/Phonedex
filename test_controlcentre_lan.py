@@ -38,3 +38,35 @@ def test_lan_certificate_contains_only_expected_addresses(tmp_path):
     names=certificate.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
     assert str(names.get_values_for_type(x509.IPAddress)[0])=='192.168.4.144'
     assert key.is_file()
+
+
+def test_link_from_another_app_can_open_dashboard_but_not_submit_cross_site(tmp_path):
+    app=create_app(tmp_path,tmp_path,lan_host='192.168.4.144',lan_subnet='192.168.4.0/22')
+    remote=TestClient(app,base_url='https://192.168.4.144:8808',client=('192.168.4.42',1234))
+    headers={'sec-fetch-site':'cross-site','sec-fetch-mode':'navigate','sec-fetch-dest':'document'}
+    assert remote.get('/api/auth/status',headers=headers).status_code==200
+    assert remote.post('/api/auth/setup',headers=headers,json={'password':'synthetic-lan-test-password'}).status_code==403
+
+
+def test_phone_setup_requires_single_use_pairing_and_never_stores_token(tmp_path):
+    app=create_app(tmp_path,tmp_path,lan_host='192.168.4.144',lan_subnet='192.168.4.0/22')
+    remote=TestClient(app,base_url='https://192.168.4.144:8808',client=('192.168.4.42',1234))
+    token=app.state.auth.create_pairing()
+    assert token not in str(app.state.store.get_meta('setup_pairing'))
+    assert remote.get('/api/auth/status').json()['setup_required'] is True
+    assert remote.post('/api/auth/setup',json={'password':'synthetic-lan-test-password','pairing_token':'wrong'}).status_code==403
+    response=remote.post('/api/auth/setup',json={'password':'synthetic-lan-test-password','pairing_token':token})
+    assert response.status_code==200
+    assert 'Secure' in response.headers['set-cookie']
+    assert remote.get('/api/workspace').status_code==200
+    assert remote.post('/api/auth/setup',json={'password':'synthetic-lan-test-password','pairing_token':token}).status_code==409
+
+
+def test_expired_phone_pairing_fails_closed(tmp_path,monkeypatch):
+    import controlcentre.auth as module
+    app=create_app(tmp_path,tmp_path,lan_host='192.168.4.144',lan_subnet='192.168.4.0/22')
+    remote=TestClient(app,base_url='https://192.168.4.144:8808',client=('192.168.4.42',1234))
+    token=app.state.auth.create_pairing()
+    monkeypatch.setattr(module.time,'time',lambda:9999999999)
+    assert remote.post('/api/auth/setup',json={'password':'synthetic-lan-test-password','pairing_token':token}).status_code==403
+    assert not app.state.auth.configured()

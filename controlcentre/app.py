@@ -74,20 +74,28 @@ def create_app(data_dir, core_root, *, demo=False,lan_host=None,lan_subnet=None)
 
     @app.middleware('http')
     async def local_boundary(request, call_next):
+        reason='invalid_request'
         try:
+            navigation=(request.method in {'GET','HEAD'} and request.headers.get('sec-fetch-mode')=='navigate'
+                        and request.headers.get('sec-fetch-dest')=='document')
             if request.client:
                 peer=ipaddress.ip_address(request.client.host)
+                if isinstance(peer,ipaddress.IPv6Address) and peer.ipv4_mapped:peer=peer.ipv4_mapped
+                reason='client_outside_allowed_subnet'
                 if not peer.is_loopback and (network is None or peer not in network):raise ValueError()
+            reason='https_required'
             if network is not None and request.url.scheme!='https':raise ValueError()
             host = request.headers.get('host', '')
             parsed = urlsplit('http://' + host)
             hostname = parsed.hostname
             port = parsed.port
             allowed = hostname in {'localhost','127.0.0.1','::1',lan_host} if network is not None else hostname == 'localhost' or ipaddress.ip_address(hostname or '').is_loopback
+            reason='unexpected_host'
             if not allowed or parsed.username or parsed.password or parsed.path or parsed.query or parsed.fragment:
                 raise ValueError()
             origin = request.headers.get('origin')
-            if origin:
+            if origin and not navigation:
+                reason='origin_mismatch'
                 origin_url = urlsplit(origin)
                 expected_port = port or (443 if request.url.scheme == 'https' else 80)
                 origin_port = origin_url.port or (443 if origin_url.scheme == 'https' else 80)
@@ -95,10 +103,11 @@ def create_app(data_dir, core_root, *, demo=False,lan_host=None,lan_subnet=None)
                         origin_port != expected_port or origin_url.path or origin_url.query or
                         origin_url.fragment or origin_url.username or origin_url.password):
                     raise ValueError()
-            if request.headers.get('sec-fetch-site') == 'cross-site':
+            reason='cross_site_request'
+            if request.headers.get('sec-fetch-site') == 'cross-site' and not navigation:
                 raise ValueError()
         except (ValueError, TypeError):
-            return JSONResponse({'detail': 'Local same-origin access required'}, status_code=403)
+            return JSONResponse({'detail': 'Local same-origin access required','code':reason}, status_code=403)
         response = await call_next(request)
         response.headers['Cache-Control'] = 'no-store'
         response.headers['X-Content-Type-Options'] = 'nosniff'
@@ -145,19 +154,25 @@ def create_app(data_dir, core_root, *, demo=False,lan_host=None,lan_subnet=None)
         except HTTPException:
             authenticated = False
         configured=auth.configured()
-        local_setup=not configured and network is not None and request.client and not ipaddress.ip_address(request.client.host).is_loopback
-        return dict(configured=configured, authenticated=authenticated,setup_required=not configured and not local_setup,local_setup_required=bool(local_setup))
+        remote_setup=not configured and network is not None and request.client and not ipaddress.ip_address(request.client.host).is_loopback
+        return dict(configured=configured, authenticated=authenticated,setup_required=not configured,pairing_required=bool(remote_setup))
+
+    @app.post('/api/auth/pairing')
+    def pairing(request:Request):
+        if not request.client or not ipaddress.ip_address(request.client.host).is_loopback:
+            raise HTTPException(403,'Pairing links can only be issued on this computer')
+        auth.throttle('pairing')
+        return {'pairing_token':auth.create_pairing(),'expires_in':600}
 
     @app.get('/api/auth/session')
     def auth_session(request: Request):
         return session_json(auth.require(request))
 
     @app.post('/api/auth/setup')
-    def setup(request:Request,payload: models.Password, response: Response):
-        if network is not None and request.client and not ipaddress.ip_address(request.client.host).is_loopback:
-            raise HTTPException(403,'Create the operator password on this computer using the loopback dashboard first')
+    def setup(request:Request,payload: models.Setup, response: Response):
         auth.throttle('setup')
-        auth.setup(payload.password)
+        remote=network is not None and request.client and not ipaddress.ip_address(request.client.host).is_loopback
+        auth.setup(payload.password,pairing_token=payload.pairing_token,remote=bool(remote))
         return issue(response)
 
     @app.post('/api/auth/login')

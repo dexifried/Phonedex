@@ -240,8 +240,14 @@ This generates an owner-protected, self-signed local certificate under
 `lan-tls/`, uses Secure cookies and rejects clients outside that subnet,
 unexpected Host/Origin headers and non-HTTPS requests. Trust that certificate
 on your phone or explicitly approve its warning for your own private address.
-First-time operator password setup remains loopback-only: create it on the
-computer first, then sign in from your phone. Windows may require an
+First-time operator password setup works directly on a phone using a one-time
+pairing link. The computer issues a random capability through the loopback-only
+`POST /api/auth/pairing` endpoint while no operator password exists. Only its
+SHA-256 digest is stored, it expires after ten minutes, and password creation
+consumes it atomically. The UI accepts it from `#pair=...`, immediately clears
+the fragment and keeps it only in memory until the HTTPS setup submission.
+No password or pairing token is placed in logs or browser storage. Unpaired
+LAN setup and replayed/expired links are refused. Windows may require an
 administrator-approved, Private-profile inbound rule for that exact TCP port
 and subnet. Neither LAN startup nor firewall permission restarts a gateway.
 Do not put this app behind a public tunnel or proxy.

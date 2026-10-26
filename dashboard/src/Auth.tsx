@@ -13,9 +13,12 @@ export default function Auth({
     [confirm, setConfirm] = useState(""),
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
+  const [pairingToken,setPairingToken]=useState(()=>new URLSearchParams(window.location.hash.slice(1)).get('pair')||'');
+  const [pairingRequired,setPairingRequired]=useState(false);
+  useEffect(()=>{if(pairingToken&&window.location.hash)window.history.replaceState(null,'',window.location.pathname+window.location.search)},[pairingToken]);
   useEffect(() => {
     api("auth/status")
-      .then((s) => {setSetup(s.setup_required ?? s.needs_setup ?? !s.configured);if(s.local_setup_required)setError('Create your operator password using the loopback dashboard on this computer first, then reload this page.');})
+      .then((s) => {setSetup(s.setup_required ?? s.needs_setup ?? !s.configured);setPairingRequired(Boolean(s.pairing_required));})
       .catch((e) => setError(e.message));
   }, []);
   if (setup === null)
@@ -36,7 +39,7 @@ export default function Auth({
     setError("");
     try {
       onAuthenticated(
-        await authenticate(setup ? "auth/setup" : "auth/login", password),
+        await authenticate(setup ? "auth/setup" : "auth/login", password,setup&&pairingToken?{pairing_token:pairingToken}:undefined),
       );
     } catch (e) {
       setError((e as Error).message);
@@ -81,6 +84,7 @@ export default function Auth({
             : "Unlock your local PhoneDex workspace."}
         </p>
         {error && <Alert error>{error}</Alert>}
+        {setup&&pairingRequired&&<Field label="Phone pairing code" hint="Filled automatically by your one-time setup link."><input required type="password" autoComplete="off" value={pairingToken} onChange={e=>setPairingToken(e.target.value)}/></Field>}
         <Field
           label="Operator password"
           hint={

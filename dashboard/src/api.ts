@@ -31,8 +31,8 @@ export async function api<T = any>(
   }
   return r.status === 204 ? (undefined as T) : await r.json();
 }
-export async function authenticate(path: string, password: string) {
-  await api(path, "POST", { password });
+export async function authenticate(path: string, password: string, extra?:{pairing_token:string}) {
+  await api(path, "POST", { password,...extra });
   const s = await api<Session>("auth/session");
   setSession(s);
   return s;

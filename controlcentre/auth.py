@@ -1,6 +1,7 @@
 """Local operator passwords and bounded in-memory browser sessions."""
 import hashlib
 import hmac
+import json
 import secrets
 import threading
 import time
@@ -29,15 +30,31 @@ class Auth:
                 raise HTTPException(429, 'Too many attempts. Try again later.')
             attempts.append(now)
 
-    def setup(self, password):
+    def create_pairing(self):
+        """Explicit bootstrap capability; retain only its digest for ten minutes."""
+        if self.configured():raise HTTPException(409,'Operator password already configured')
+        token=secrets.token_urlsafe(32)
+        self.store.set_meta('setup_pairing',{'digest':hashlib.sha256(token.encode()).hexdigest(),'expires':time.time()+600})
+        return token
+
+    def setup(self, password, *, pairing_token=None, remote=False):
         with self.lock:
-            if self.configured():
-                raise HTTPException(409, 'Operator password already configured')
-            if len(password) < 12:
-                raise HTTPException(422, 'Use a password of at least 12 characters')
-            salt = secrets.token_bytes(16)
-            digest = hashlib.scrypt(password.encode(), salt=salt, n=16384, r=8, p=1).hex()
-            self.store.set_meta('operator_password', {'salt': salt.hex(), 'digest': digest})
+            with self.store.connect() as db:
+                db.execute('BEGIN IMMEDIATE')
+                if db.execute("SELECT 1 FROM meta WHERE key='operator_password'").fetchone():
+                    raise HTTPException(409, 'Operator password already configured')
+                if remote:
+                    row=db.execute("SELECT data FROM meta WHERE key='setup_pairing'").fetchone()
+                    pairing=json.loads(row['data']) if row else {}
+                    candidate=hashlib.sha256((pairing_token or '').encode()).hexdigest()
+                    if (pairing.get('expires',0)<=time.time() or not hmac.compare_digest(candidate,pairing.get('digest',''))):
+                        raise HTTPException(403,'A valid one-time phone pairing link is required')
+                if len(password)<12:raise HTTPException(422,'Use a password of at least 12 characters')
+                salt=secrets.token_bytes(16)
+                digest=hashlib.scrypt(password.encode(),salt=salt,n=16384,r=8,p=1).hex()
+                db.execute("INSERT INTO meta(key,data) VALUES('operator_password',?)",(json.dumps({'salt':salt.hex(),'digest':digest}),))
+                db.execute("DELETE FROM meta WHERE key='setup_pairing'")
+                self.store._change(db)
 
     def verify(self, password):
         record = self.store.get_meta('operator_password')
