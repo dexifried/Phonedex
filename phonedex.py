@@ -104,6 +104,8 @@ def main():
     dashboard.add_argument("--headless",action="store_true")
     dashboard.add_argument("--data-dir",default=None)
     dashboard.add_argument("--demo",action="store_true")
+    dashboard.add_argument('--lan',action='store_true')
+    dashboard.add_argument('--lan-subnet',default=None)
     dialing=sub.add_parser("dial",help="Dry-run an allowed destination unless --place-call is set")
     dialing.add_argument("--to",required=True)
     dialing.add_argument("--mode",choices=("normal","business"),default="normal")
@@ -123,6 +125,8 @@ def main():
         if args.headless:options.append("--headless")
         if args.demo:options.append("--demo")
         if args.data_dir:options.extend(["--data-dir",args.data_dir])
+        if args.lan:options.append('--lan')
+        if args.lan_subnet:options.extend(['--lan-subnet',args.lan_subnet])
         try:run_dashboard(options,core_root=ROOT)
         except ValueError as exc:raise SystemExit(str(exc)) from None
     elif args.action=="setup":

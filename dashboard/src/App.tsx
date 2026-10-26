@@ -373,7 +373,7 @@ export default function App() {
               <div>
                 Local
                 <small>
-                  {offline ? "Reconnecting…" : "Connected to 127.0.0.1"}
+                  {offline ? "Reconnecting…" : `Connected to ${window.location.hostname}`}
                 </small>
               </div>
               <ChevronDown size={14} />

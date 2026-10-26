@@ -18,6 +18,8 @@ def arguments(argv=None):
     p.add_argument('--headless',action='store_true',help='Do not open a browser')
     p.add_argument('--data-dir',type=Path,default=None)
     p.add_argument('--demo',action='store_true',help='Synthetic isolated workspace; dialing disabled')
+    p.add_argument('--lan',action='store_true',help='Explicit private-subnet HTTPS access')
+    p.add_argument('--lan-subnet',default=None,help='Permitted private client subnet, required with --lan')
     return p.parse_args(argv)
 
 
@@ -25,7 +27,10 @@ def run_dashboard(argv=None,*,core_root=None):
     args=arguments(argv)
     try:loopback=ipaddress.ip_address(args.host).is_loopback
     except ValueError:loopback=False
-    if not loopback:raise ValueError('Dashboard binding is restricted to a loopback address')
+    if not loopback and not args.lan:raise ValueError('Dashboard binding is restricted to a loopback address unless --lan is explicitly enabled')
+    if args.lan:
+        from .lan import validate_lan
+        validate_lan(args.host,args.lan_subnet)
     if not 0<=args.port<=65535:raise ValueError('Choose a port from 1–65535 (0 selects a free port)')
     folder=(args.data_dir or (data_directory()/'demo' if args.demo else data_directory())).expanduser()
     from .store import Store
@@ -50,15 +55,20 @@ def run_dashboard(argv=None,*,core_root=None):
         listener.close()
         raise ValueError('Install optional requirements-dashboard.txt in the core virtualenv first') from None
     root=Path(core_root) if core_root else Path(__file__).resolve().parents[1]
-    app=create_app(folder,root,demo=args.demo)
+    app=create_app(folder,root,demo=args.demo,lan_host=args.host if args.lan else None,lan_subnet=args.lan_subnet)
     @asynccontextmanager
     async def lifespan(_app):
         yield
         if app.state.runtime is not None:await app.state.runtime.shutdown()
         with store.connect() as db:db.execute('PRAGMA wal_checkpoint(TRUNCATE)')
     app.router.lifespan_context=lifespan
-    url=f'http://{("["+args.host+"]") if ":" in args.host else args.host}:{actual_port}'
-    server=uvicorn.Server(uvicorn.Config(app,host=args.host,port=actual_port,access_log=False,log_level='warning'))
+    tls={}
+    if args.lan:
+        from .lan import local_certificate
+        certificate,key=local_certificate(folder,args.host)
+        tls={'ssl_certfile':str(certificate),'ssl_keyfile':str(key)}
+    url=f'{"https" if args.lan else "http"}://{("["+args.host+"]") if ":" in args.host else args.host}:{actual_port}'
+    server=uvicorn.Server(uvicorn.Config(app,host=args.host,port=actual_port,access_log=False,log_level='warning',proxy_headers=False,**tls))
     if not args.headless:
         def open_when_ready():
             deadline=time.monotonic()+15

@@ -228,12 +228,23 @@ argument. Lose the key/account or wrapping passphrase and the values cannot be
 recovered. Without secure storage, ordinary dashboard/history access works,
 while encryption-dependent operations fail closed.
 
-The server only binds loopback. It validates request peer, Host and Origin,
+The server binds loopback by default. It validates request peer, Host and Origin,
 uses strict HttpOnly cookies, CSRF tokens, scrypt password hashing, throttling,
 bounded in-memory sessions and CSP. Sessions expire after eight hours and
-reauthentication after two minutes. No LAN/public mode is included. Do not put
-this app behind a public tunnel or proxy; a separate authenticated TLS access
-design and explicit opt-in would be required.
+reauthentication after two minutes. Public exposure is not supported.
+
+An explicit `--lan --host PRIVATE_IP --lan-subnet PRIVATE_CIDR` enables a
+separate HTTPS listener for a restricted private subnet. Example:
+`python phonedex.py dashboard --lan --host 192.168.4.144 --lan-subnet 192.168.4.0/22 --port 8808`.
+This generates an owner-protected, self-signed local certificate under
+`lan-tls/`, uses Secure cookies and rejects clients outside that subnet,
+unexpected Host/Origin headers and non-HTTPS requests. Trust that certificate
+on your phone or explicitly approve its warning for your own private address.
+First-time operator password setup remains loopback-only: create it on the
+computer first, then sign in from your phone. Windows may require an
+administrator-approved, Private-profile inbound rule for that exact TCP port
+and subnet. Neither LAN startup nor firewall permission restarts a gateway.
+Do not put this app behind a public tunnel or proxy.
 
 ## Verification
 

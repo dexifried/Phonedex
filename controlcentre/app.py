@@ -1,4 +1,4 @@
-"""Loopback-only optional dashboard API. Importing this module starts no service."""
+"""Optional local dashboard API, with explicit private-subnet TLS mode."""
 from __future__ import annotations
 
 import asyncio
@@ -47,7 +47,11 @@ def native_summary(core_root):
             mode if mode in {'off', 'local', 'worker', 'both'} else 'unknown')
 
 
-def create_app(data_dir, core_root, *, demo=False):
+def create_app(data_dir, core_root, *, demo=False,lan_host=None,lan_subnet=None):
+    network=None
+    if lan_host is not None:
+        from .lan import validate_lan
+        _,network=validate_lan(lan_host,lan_subnet)
     from .vault import Vault
     from .crypto import ProtectedCipher
     app = FastAPI(title='PhoneDex Control Centre', docs_url=None, redoc_url=None, openapi_url=None)
@@ -71,13 +75,15 @@ def create_app(data_dir, core_root, *, demo=False):
     @app.middleware('http')
     async def local_boundary(request, call_next):
         try:
-            if request.client and not ipaddress.ip_address(request.client.host).is_loopback:
-                raise ValueError()
+            if request.client:
+                peer=ipaddress.ip_address(request.client.host)
+                if not peer.is_loopback and (network is None or peer not in network):raise ValueError()
+            if network is not None and request.url.scheme!='https':raise ValueError()
             host = request.headers.get('host', '')
             parsed = urlsplit('http://' + host)
             hostname = parsed.hostname
             port = parsed.port
-            allowed = hostname == 'localhost' or ipaddress.ip_address(hostname or '').is_loopback
+            allowed = hostname in {'localhost','127.0.0.1','::1',lan_host} if network is not None else hostname == 'localhost' or ipaddress.ip_address(hostname or '').is_loopback
             if not allowed or parsed.username or parsed.password or parsed.path or parsed.query or parsed.fragment:
                 raise ValueError()
             origin = request.headers.get('origin')
@@ -128,7 +134,7 @@ def create_app(data_dir, core_root, *, demo=False):
 
     def issue(response):
         token, session = auth.issue()
-        response.set_cookie(COOKIE, token, httponly=True, samesite='strict', max_age=8 * 3600, path='/')
+        response.set_cookie(COOKIE, token, httponly=True, secure=network is not None, samesite='strict', max_age=8 * 3600, path='/')
         return session_json(session)
 
     @app.get('/api/auth/status')
@@ -138,14 +144,18 @@ def create_app(data_dir, core_root, *, demo=False):
             authenticated = True
         except HTTPException:
             authenticated = False
-        return dict(configured=auth.configured(), authenticated=authenticated)
+        configured=auth.configured()
+        local_setup=not configured and network is not None and request.client and not ipaddress.ip_address(request.client.host).is_loopback
+        return dict(configured=configured, authenticated=authenticated,setup_required=not configured and not local_setup,local_setup_required=bool(local_setup))
 
     @app.get('/api/auth/session')
     def auth_session(request: Request):
         return session_json(auth.require(request))
 
     @app.post('/api/auth/setup')
-    def setup(payload: models.Password, response: Response):
+    def setup(request:Request,payload: models.Password, response: Response):
+        if network is not None and request.client and not ipaddress.ip_address(request.client.host).is_loopback:
+            raise HTTPException(403,'Create the operator password on this computer using the loopback dashboard first')
         auth.throttle('setup')
         auth.setup(payload.password)
         return issue(response)

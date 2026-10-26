@@ -15,7 +15,7 @@ export default function Auth({
     [error, setError] = useState("");
   useEffect(() => {
     api("auth/status")
-      .then((s) => setSetup(s.setup_required ?? s.needs_setup ?? !s.configured))
+      .then((s) => {setSetup(s.setup_required ?? s.needs_setup ?? !s.configured);if(s.local_setup_required)setError('Create your operator password using the loopback dashboard on this computer first, then reload this page.');})
       .catch((e) => setError(e.message));
   }, []);
   if (setup === null)
