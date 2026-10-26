@@ -58,6 +58,7 @@ export interface Call {
   heartbeat_at?: number;
   updated_at?: string;
   transcript_enabled?: boolean;
+  backend_provider_id?: string;
 }
 export interface Agent {
   id: string;
@@ -135,6 +136,21 @@ export interface Health {
   sip_transport?: string;
   gpt_live?: string;
   transcript_storage?: boolean | string | null;
+  backend?: BackendConnection;
+}
+export interface BackendConnection {
+  mode: "local" | "remote-control";
+  status: "unconfigured" | "connecting" | "connected" | "offline";
+  provider?: string;
+  last_sync?: number | null;
+  last_success?: number | null;
+  error?: string | null;
+  notice?: string;
+  transcript_delivery?: string;
+  polling?: string;
+  supported_controls?: string[];
+  vault_disclosure?: boolean;
+  local_transcript_cache?: boolean;
 }
 export interface Stats {
   total_calls?: number;

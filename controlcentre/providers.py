@@ -5,7 +5,7 @@ from fastapi import HTTPException
 
 
 CONFIG_KEYS = {'termination_uri', 'public_ip', 'caller_id', 'allowed_recipients', 'gateway_url',
-               'media_port', 'media_port_forwarded', 'max_calls_per_day', 'region', 'transport'}
+               'media_port', 'media_port_forwarded', 'max_calls_per_day', 'region', 'transport', 'cache_transcripts'}
 
 
 def validate_config(config, kind='sip', *, require_complete=True):
@@ -37,6 +37,8 @@ def validate_config(config, kind='sip', *, require_complete=True):
                 valid = False
             if not valid:
                 errors.append(key)
+        elif key=='cache_transcripts' and type(value) is not bool:
+            errors.append(key)
     return dict(valid=not errors, checked_locally=True, network_verified=False,
                 errors=[{'field': key, 'message': 'Missing, invalid or unsupported configuration field'} for key in dict.fromkeys(errors)])
 

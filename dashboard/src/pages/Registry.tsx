@@ -685,6 +685,11 @@ function EditForm({
                 </Field>
               ))}
             </div>
+            {form.kind === "worker" && <label className="check">
+              <input type="checkbox" checked={form.config?.cache_transcripts === true}
+                onChange={e => change("config", { ...form.config, cache_transcripts: e.target.checked })} />
+              Store copies of remote transcripts on this computer
+            </label>}
             <label className="check">
               <input
                 type="checkbox"
@@ -693,7 +698,7 @@ function EditForm({
               />
               Mark configuration enabled
             </label>
-            <Alert>Saving does not start, restart or connect a gateway.</Alert>
+            <Alert>{form.kind === "worker" ? "Enabled control providers synchronize through the existing API. Saving never starts or restarts the telephony gateway." : "Saving does not start, restart or connect a gateway."}</Alert>
           </>
         )}
         {kind === "tasks" && (

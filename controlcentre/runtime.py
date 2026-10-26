@@ -35,9 +35,10 @@ def config_from(root: Path) -> dict[str,str]:
 
 
 class Runtime:
-    def __init__(self,data_dir,core_root,store,vault):
+    def __init__(self,data_dir,core_root,store,vault,*,backend=None):
         self.data_dir,self.core_root=Path(data_dir),Path(core_root)
         self.store,self.vault=store,vault
+        self.backend=backend
         self._approvals={}
         self._lock=threading.Lock()
         self._child=None
@@ -66,8 +67,12 @@ class Runtime:
             raise ValueError('Select an enabled agent')
         number=contact.get('number','')
         config=config_from(self.core_root)
+        providers=[p for p in self.store.list('providers') if p.get('enabled') and p.get('kind')!='openai']
+        if len(providers)>1:raise ValueError('Enable only one outbound SIP or control provider')
+        provider=providers[0] if providers else None
+        remote=bool(provider and provider.get('kind')=='worker')
         allowed={n.strip() for n in config.get('PHONEDEX_ALLOWED_RECIPIENTS','').split(',') if n.strip()}
-        if not re.fullmatch(r'\+[1-9]\d{6,14}',number) or number not in allowed:
+        if not re.fullmatch(r'\+[1-9]\d{6,14}',number) or (not remote and number not in allowed):
             raise ValueError('Recipient must also be in the core PHONEDEX_ALLOWED_RECIPIENTS allowlist')
         duration=payload.get('duration_seconds',120)
         if type(duration) is not int or not 20<=duration<=min(300,agent.get('max_duration_seconds',120)):
@@ -77,6 +82,7 @@ class Runtime:
             raise ValueError('Combined agent and task instructions must be 1–2000 characters')
         permissions=payload.get('profile_fields',[])
         if not isinstance(permissions,list) or len(permissions)>20:raise ValueError('Invalid field permissions')
+        if remote and permissions:raise ValueError('Profile disclosure is unavailable through this remote control protocol')
         known={f['id']:f for p in self.vault.profiles() for f in self.vault.fields(p['id'])} if permissions else {}
         for grant in permissions:
             if (not isinstance(grant,dict) or set(grant)!={'field_id','purpose'} or grant['field_id'] not in known or
@@ -85,10 +91,18 @@ class Runtime:
         mode=agent.get('mode','normal')
         if mode not in {'normal','business'}:
             raise ValueError('Agent mode unsupported by PhoneDex')
-        providers=[p for p in self.store.list('providers') if p.get('enabled')]
-        if len(providers)>1:
-            raise ValueError('Enable only one outbound SIP provider')
-        provider=providers[0] if providers else None
+        if remote:
+            if self.backend is None:raise ValueError('PhoneDex control backend is unavailable')
+            configured=provider.get('config',{})
+            remote_allowed={v.strip() for v in str(configured.get('allowed_recipients','')).split(',') if v.strip()}
+            if remote_allowed and number not in remote_allowed:
+                raise ValueError('Recipient is outside the selected provider allowlist')
+            # Validate encrypted credentials and endpoint without any network call.
+            client=self.backend.client(provider)
+            client.close()
+            digest=hashlib.sha256(json.dumps([contact,agent,provider,duration,prompt],sort_keys=True).encode()).hexdigest()
+            return dict(contact=contact,agent=agent,provider=provider,config={},number=number,duration=duration,
+                prompt=prompt,mode=mode,digest=digest,permissions=[],remote=True)
         if provider:
             mapped={'termination_uri':'PHONEDEX_TERMINATION_URI','public_ip':'PHONEDEX_PUBLIC_IP',
                     'caller_id':'PHONEDEX_CALLER_ID','media_port':'PHONEDEX_MEDIA_PORT',
@@ -142,6 +156,11 @@ class Runtime:
             authorized_fields=review['permissions'],notice='This explicit approval will place one potentially billable call and create only the reviewed field grants.')
 
     async def dial(self,approval_id):
+        # Dispatch can block on HTTPS. Keep both its lock and I/O off the ASGI
+        # event loop so another approval cannot deadlock the dashboard.
+        return await asyncio.to_thread(self._dial,approval_id)
+
+    def _dial(self,approval_id):
         with self._lock:
             approval=self._approvals.pop(approval_id,None)
             if not approval or approval['expires']<time.time():
@@ -155,8 +174,29 @@ class Runtime:
                    and isinstance(c.get('heartbeat_at'),(float,int)) and 0<=time.time()-c['heartbeat_at']<15]
             if fresh:
                 raise ValueError('An instrumented PhoneDex call is already active')
-            call_id='call_'+uuid.uuid4().hex
+            request_id='dashboard_'+uuid.uuid4().hex
+            call_id=('call_'+hashlib.sha256(request_id.encode()).hexdigest()[:32] if review.get('remote') else 'call_'+uuid.uuid4().hex)
             self._reserve(call_id,review['duration'])
+            if review.get('remote'):
+                record=dict(id=call_id,contact=review['contact']['name'],number_masked=mask_number(review['number']),
+                    agent_id=review['agent']['id'],agent_name=review['agent']['name'],provider=review['provider']['name'],
+                    backend_provider_id=review['provider']['id'],direction='outbound',
+                    started_at=datetime.now(timezone.utc).isoformat(),controls=[])
+                task=dict(to=review['number'],mode=review['mode'],prompt=review['prompt'],
+                    duration_seconds=review['duration'],request_id=request_id)
+                # Persist before POST so cancellation/crash can be reconciled by
+                # the deterministic ID without submitting another call.
+                self.store.record_call({**record,'state':'unknown'})
+                try:
+                    self.backend.dispatch(review['provider'],task)
+                except Exception:
+                    # The worker may have accepted the request before the network
+                    # failed. Preserve its deterministic ID and reservation; no retry.
+                    self.store.record_call({**record,'state':'unknown'})
+                    self.store.add_event({'kind':'dispatch_unknown','call_id':call_id,'source':'control-api',
+                        'message':'Call submission could not be confirmed. Check this call before trying again.'})
+                    raise ValueError('Call submission could not be confirmed; do not automatically retry') from None
+                return self.store.record_call({**record,'state':'queued'})
             for grant in review['permissions']:
                 self.vault.grant(grant['field_id'],call_id,review['number'],grant['purpose'],min(300,review['duration']+30))
             child_env=os.environ.copy()
@@ -197,6 +237,16 @@ class Runtime:
         at=call.get('heartbeat_at',0)
         if not isinstance(at,(int,float)) or not 0<=time.time()-at<15 or kind not in call.get('controls',[]):
             raise ValueError('Fresh gateway telemetry and this call capability are required')
+        if call.get('backend_provider_id'):
+            if kind=='profile_field':raise ValueError('Profile disclosure is unavailable on this backend')
+            if kind=='steer':
+                instruction=payload.get('instruction','')
+                if not isinstance(instruction,str) or not 2<=len(instruction)<=900:
+                    raise ValueError('Private instruction must be 2–900 characters')
+                payload={'instruction':instruction}
+            else:payload={}
+            if self.backend is None:raise ValueError('Control backend unavailable')
+            return await asyncio.to_thread(self.backend.control,call,kind,payload)
         if kind=='profile_field':
             field_id,purpose=payload.get('field_id'),payload.get('purpose')
             if not isinstance(field_id,str) or not 1<=len(field_id)<=100 or not isinstance(purpose,str) or not 1<=len(purpose)<=500:

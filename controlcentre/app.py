@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 import inspect
 import ipaddress
 import json
@@ -64,13 +65,28 @@ def create_app(data_dir, core_root, *, demo=False,lan_host=None,lan_subnet=None)
     app.state.store, app.state.auth, app.state.vault = store, auth, vault
     app.state.provider_cipher = provider_cipher
     app.state.demo = demo
+    from .backend import RemoteBackend
+    backend = RemoteBackend(store, vault, cipher=provider_cipher)
+    app.state.backend = backend
     approval_owners = {}
     approval_lock = threading.RLock()
     try:
         from .runtime import Runtime
-        app.state.runtime = Runtime(Path(data_dir), Path(core_root), store, vault)
+        app.state.runtime = Runtime(Path(data_dir), Path(core_root), store, vault, backend=backend)
     except ImportError:
         app.state.runtime = None
+
+    @asynccontextmanager
+    async def lifespan(_app):
+        if not demo:
+            backend.start()
+        try:
+            yield
+        finally:
+            await backend.stop()
+            if app.state.runtime is not None:
+                await app.state.runtime.shutdown()
+    app.router.lifespan_context = lifespan
 
     @app.middleware('http')
     async def local_boundary(request, call_next):
@@ -129,12 +145,19 @@ def create_app(data_dir, core_root, *, demo=False,lan_host=None,lan_subnet=None)
             return item
         return walk(value)
 
-    def call_view(call,*,sanitize=True):
+    def call_view(call,*,sanitize=True,connection=None):
         if call is None:
             raise HTTPException(404, 'Call not found')
+        if call.get('backend_provider_id'):
+            transient=backend.transcript(call['id'])
+            if transient:
+                # A cache-policy change must not hide new memory-only records.
+                # Prefer the current redacted text for an already-saved event.
+                combined={item['event_id']:item for item in [*call.get('transcript',[]),*transient]}
+                call={**call,'transcript':sorted(combined.values(),key=lambda item:item.get('ms',0))}
         at = call.get('heartbeat_at')
         fresh = isinstance(at, (int, float)) and 0 <= time.time() - at < 15
-        if call['state'] in {'active', 'ringing', 'dialing', 'connected', 'answered', 'ending'} and (not fresh or health()['gateway'] != 'connected'):
+        if call['state'] in {'active', 'ringing', 'dialing', 'connected', 'answered', 'ending'} and (not fresh or (connection or health())['gateway'] != 'connected'):
             call = {**call, 'state': 'unknown', 'controls': []}
         return safe(call) if sanitize else call
 
@@ -203,16 +226,19 @@ def create_app(data_dir, core_root, *, demo=False,lan_host=None,lan_subnet=None)
         at = heartbeat.get('at')
         fresh = isinstance(at, (int, float)) and 0 <= time.time() - at < 15
         _, mode = native_summary(core_root)
-        return dict(dashboard='online', gateway='connected' if fresh and heartbeat.get('status') == 'connected' else 'unknown',
-                    gateway_last_seen=at, vault='available', demo=demo, transcript_mode=mode,
+        remote=backend.status()
+        connected=remote['status']=='connected'
+        return dict(dashboard='online', gateway='connected' if connected or fresh and heartbeat.get('status') == 'connected' else 'unknown',
+                    gateway_last_seen=remote.get('last_success') if connected else at, backend=remote,
+                    vault='available', demo=demo, transcript_mode=mode,
                     transcript_storage=None if mode == 'unknown' else mode in {'local', 'both'},
                     sip_transport='Unverified', gpt_live='Unverified')
 
     @app.get('/api/workspace')
     def workspace(request: Request):
         auth.require(request)
-        calls = [call_view(c,sanitize=False) for c in store.calls()]
         connection = health()
+        calls = [call_view(c,sanitize=False,connection=connection) for c in store.calls()]
         return safe(dict(health=connection, stats=analytics(calls), calls=calls,
                     agents=store.list('agents'), contacts=store.list('contacts'),
                     providers=[public_provider(p) for p in store.list('providers')], tasks=store.list('tasks'),
@@ -238,9 +264,21 @@ def create_app(data_dir, core_root, *, demo=False,lan_host=None,lan_subnet=None)
     def settings(request: Request):
         auth.require(request)
         presence, mode = native_summary(core_root)
-        return dict(configuration=presence, mode='local', demo=demo,
+        return dict(configuration=presence, mode=backend.status()['mode'], backend=backend.status(), demo=demo,
                     gateway_managed=False, transcript_storage='opt-in', transcript_mode=mode,
                     unavailable=['hold', 'mute', 'transfer', 'conference', 'scheduled_dialing', 'messaging'])
+
+    @app.get('/api/backend')
+    def backend_status(request: Request):
+        auth.require(request)
+        return backend.status()
+
+    @app.post('/api/backend/sync')
+    async def sync_backend(request: Request):
+        auth.require(request)
+        auth.throttle('backend_sync')
+        if demo:raise HTTPException(409,'Synthetic workspaces do not connect to live backends')
+        return await asyncio.to_thread(backend.sync_once)
 
     @app.get('/api/export')
     def export(request: Request, format: str = 'json'):
@@ -334,8 +372,9 @@ def create_app(data_dir, core_root, *, demo=False,lan_host=None,lan_subnet=None)
         if demo or runtime is None or not hasattr(runtime, method):
             raise HTTPException(501, 'Runtime capability unavailable')
         try:
-            result = getattr(runtime, method)(*args)
-            return safe(await result if inspect.isawaitable(result) else result)
+            operation=getattr(runtime,method)
+            result=await operation(*args) if inspect.iscoroutinefunction(operation) else await asyncio.to_thread(operation,*args)
+            return safe(result)
         except (ValueError, RuntimeError, PermissionError, KeyError, OSError):
             raise HTTPException(409, 'Runtime prerequisites or approval not satisfied') from None
 

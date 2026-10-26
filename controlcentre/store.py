@@ -22,7 +22,7 @@ CALL_DEFAULTS = dict(contact='', number_masked='', direction='outbound', agent_i
                      cost=None, cost_kind=None, transcript=[], timeline=[], results=[], controls=[])
 TERMINAL = {'completed', 'failed', 'cancelled', 'ended', 'rejected', 'busy', 'no_answer', 'interrupted'}
 PROGRESS = {'unknown': 0, 'created': 1, 'queued': 1, 'dialing': 2, 'ringing': 3, 'connected': 4, 'active': 4, 'answered': 4, 'ending': 5}
-CALL_FIELDS = set(CALL_DEFAULTS) | {'id', 'updated_at', 'error_code', 'transcript_enabled', 'heartbeat_at'}
+CALL_FIELDS = set(CALL_DEFAULTS) | {'id', 'updated_at', 'error_code', 'transcript_enabled', 'heartbeat_at', 'backend_provider_id'}
 EVENT_FIELDS = {'id', 'call_id', 'kind', 'type', 'message', 'at', 'level', 'source', 'state', 'code'}
 
 

@@ -55,6 +55,7 @@ export function CallsPage({
     (c) =>
       (!live ||
         [
+          "queued",
           "active",
           "dialing",
           "ringing",
@@ -91,9 +92,11 @@ export function CallsPage({
         }
         description={
           live
-            ? "Monitor active sessions and guide your agents as they work."
+            ? data.health.backend?.mode === "remote-control"
+              ? "Updates arrive through the existing PhoneDex control API and may be delayed."
+              : "Monitor active sessions and guide your agents as they work."
             : transcripts
-              ? "Search completed utterances and open the full conversation."
+              ? "Search available transcript records and open the conversation."
               : "Explore recorded calls, outcomes and structured task results."
         }
         action={
@@ -375,6 +378,7 @@ export function CallDetail({
           </div>
           {tab === "Conversation" ? (
             <>
+              {call.backend_provider_id && <Alert>Provider transcript batches may be delayed or incomplete. These are model-estimated words, not an audio recording.</Alert>}
               <div className="transcript-toolbar">
                 <div className="search-input">
                   <Search size={15} />
@@ -418,7 +422,7 @@ export function CallDetail({
                   <Empty
                     icon={<FileText size={28} />}
                     title="No transcript recorded"
-                    description="Only completed utterances are shown. Transcript storage must be enabled in the core."
+                    description={call.backend_provider_id ? "The PhoneDex control API has not supplied transcript records for this call." : "Only completed utterances are shown. Transcript storage must be enabled in the core."}
                   />
                 )}
               </div>
@@ -688,7 +692,7 @@ export function PrepareCall({
           </div>
           <Field
             label="What should the agent do?"
-            hint="Keep secrets out of prompts. Use scoped vault grants for personal information."
+            hint={data.health.backend?.mode === "remote-control" ? "Keep secrets out of prompts. Scoped vault disclosure is unavailable through this backend." : "Keep secrets out of prompts. Use scoped vault grants for personal information."}
           >
             <textarea
               rows={4}
@@ -710,6 +714,7 @@ export function PrepareCall({
           </Field>
           <Field label="Personal profile (optional)">
             <select
+              disabled={data.health.backend?.mode === "remote-control"}
               value={profile}
               onChange={(e) => setProfile(e.target.value)}
             >
@@ -721,6 +726,7 @@ export function PrepareCall({
               ))}
             </select>
           </Field>
+          {data.health.backend?.mode === "remote-control" && <p className="subtle">This backend does not support scoped profile-field tools. No vault fields will be supplied.</p>}
           {fields.map((f) => (
             <label className="check" key={f.id}>
               <input

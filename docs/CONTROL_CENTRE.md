@@ -75,6 +75,56 @@ caller records or carrier connections are needed.
 
 ## Connect the public PhoneDex runtime
 
+### Connect an already-running PhoneDex control backend
+
+In Providers & SIP add a `worker` provider with its own HTTPS gateway URL
+ending in `/agent/gateway` and the **operator** bearer in the encrypted `token`
+field. This is a separate credential from the gateway's polling token. Enable
+one SIP/control provider at a time. Settings → Diagnostics shows authenticated
+control connectivity and includes **Sync backend**. Configuration validation
+remains a local check; synchronization makes actual read-only API requests.
+
+This adapter reuses the existing controller: it never starts or restarts SIP.
+It discovers advertised capabilities, subscribes to local SSE for browser
+updates, and polls the older upstream API because that protocol has no SSE.
+Active calls are checked every five seconds, idle discovery every fifteen;
+failures back off. Upstream KV propagation can delay call states, transcripts
+and commands. Active calls take priority over historical reconciliation. Recent
+terminal calls are reconciled for three minutes to catch final transcript
+batches. Old provider records may already have expired; they cannot be
+reconstructed. Cached call metadata remains available offline.
+
+Remote transcripts are displayed from a bounded in-memory cache by default;
+**Store copies of remote transcripts on this computer** is an explicit provider
+option, disabled by default. This option controls importing existing provider
+text, independently of native `PHONEDEX_TRANSCRIPT_MODE`. Turning it off does
+not erase previously saved copies. Local copies currently have no automatic
+pruning. Bulk exports include persisted local records; an individually authorized
+call export may include its currently available in-memory transcript. Incoming transcript
+fragments are redacted together as well as individually; no secret values or
+transcript content enter diagnostic events. Existing upstream retention and
+disclosure cannot be undone by local masking.
+
+Optional `PHONEDEX_CONTROL_CALL_INDEX` names a local `dispatched.json` containing
+call IDs and timestamps. It is read without importing that runtime's source;
+this discovers outbound calls the legacy API cannot enumerate. Inbound event
+discovery is used only when advertised. No private installation path or
+credential is required by the public source.
+
+An allowed contact and enabled agent template can be reviewed and explicitly
+dialed through the selected controller. No SIP credentials are copied into a
+second telephony engine. Stable request IDs, persisted pre-dispatch records,
+session-bound one-use approval, reauthentication and a shared concurrency lease
+prevent accidental retries. An ambiguous response stays unknown and is
+reconciled by ID; it is never automatically dialed again. Hangup/private
+instruction appear only on freshly observed calls advertising those operations.
+Remote scoped vault disclosure is unavailable because this protocol lacks a
+profile-field tool. Carrier billing, transfer, conference and messaging remain
+unavailable in this interface. Agent records are reusable per-call templates,
+not an independent remote agent registry.
+
+### Native public-core event hooks
+
 Historical management works with the gateway disconnected. Starting the
 dashboard does **not** connect, start or restart a SIP gateway, controller,
 Cloudflare Worker, private production service or model session.

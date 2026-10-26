@@ -56,10 +56,11 @@ def run_dashboard(argv=None,*,core_root=None):
         raise ValueError('Install optional requirements-dashboard.txt in the core virtualenv first') from None
     root=Path(core_root) if core_root else Path(__file__).resolve().parents[1]
     app=create_app(folder,root,demo=args.demo,lan_host=args.host if args.lan else None,lan_subnet=args.lan_subnet)
+    app_lifespan=app.router.lifespan_context
     @asynccontextmanager
     async def lifespan(_app):
-        yield
-        if app.state.runtime is not None:await app.state.runtime.shutdown()
+        async with app_lifespan(_app):
+            yield
         with store.connect() as db:db.execute('PRAGMA wal_checkpoint(TRUNCATE)')
     app.router.lifespan_context=lifespan
     tls={}

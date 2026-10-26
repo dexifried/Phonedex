@@ -42,6 +42,7 @@ import {
   date,
 } from "../ui";
 import { ActivityChart, Health } from "./Overview";
+import BackendConnection from "./BackendConnection";
 export { default as Analytics } from "./Analytics";
 export function Logs({ data }: { data: Workspace }) {
   const [query, setQuery] = useState(""),
@@ -267,7 +268,7 @@ export function Settings({
           <Panel title="Workspace" icon={<Server size={18} />}>
             <dl className="context-list">
               <dt>Connection</dt>
-              <dd>Local · 127.0.0.1</dd>
+              <dd>{window.location.hostname}</dd>
               <dt>Version</dt>
               <dd>PhoneDex Control Centre v0.1.0</dd>
               <dt>Sessions</dt>
@@ -279,6 +280,7 @@ export function Settings({
         </div>
       ) : tab === "Diagnostics" ? (
         <div className="settings-grid">
+          <BackendConnection connection={data.health.backend} demo={data.health.demo} refresh={refresh} />
           <Health health={data.health} />
           <Panel title="Runtime capabilities" icon={<ShieldCheck size={18} />}>
             <div className="capability-list">
@@ -318,9 +320,9 @@ export function Settings({
           </Panel>
           <Panel title="Transcript retention" icon={<Database size={18} />}>
             <p className="panel-description">
-              Transcript recording is opt-in and controlled by the PhoneDex core
-              configuration. The dashboard displays only completed utterances
-              that the core records.
+              {data.health.backend?.mode === "remote-control"
+                ? "The control API supplies existing provider transcript batches. Temporary display uses memory. Saving local copies requires the provider's explicit transcript-cache option; disabling it does not delete earlier copies."
+                : "Transcript recording is opt-in and controlled by the PhoneDex core configuration. The dashboard displays only completed utterances that the core records."}
             </p>
             <Alert>
               Review your core transcript storage settings before recording

@@ -115,7 +115,7 @@ export function Health({ health }: { health: Workspace["health"] }) {
   const items = [
     {
       icon: Server,
-      label: "Gateway",
+      label: health.backend?.mode === "remote-control" ? "Control API" : "Gateway",
       value:
         health.gateway === "connected"
           ? "Connected"
