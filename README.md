@@ -36,6 +36,22 @@ hosted-versus-SIP call.
 
 ![Bar chart comparing AgentPhone charges per 100 call-minutes: hosted $22, webhook $13, PhoneDex outbound SIP $1.99, and PhoneDex inbound SIP $0.37.](assets/graphs/agentphone-credit-savings.svg)
 
+### Windows quickstart: guided PhoneDex CLI
+
+The optional [PhoneDex CLI](https://github.com/dexifried/Phonedex-CLI) provides
+a **Windows-first, resumable setup experience**. It guides cloning, isolated
+Python dependencies, Codex sign-in, AgentPhone/SIP configuration, Windows UDP
+media forwarding, local checks and a separately approved test call:
+
+```powershell
+pipx install phonedex-cli
+phonedex-cli wizard
+```
+
+[Detailed Windows setup guide](https://github.com/dexifried/Phonedex-CLI/blob/main/docs/WINDOWS_SETUP.md).
+Install Python 3.11+ and pipx first. You still need your own SIP provider,
+credentials and router access. The wizard cannot guarantee a working call.
+
 ## First five minutes: local quickstart
 
 **Start here** if you want to try PhoneDex. This prepares an isolated Python
@@ -133,6 +149,9 @@ Do not claim success until the relevant checks actually pass.
 - A self-hosted controller that polls the Worker over outbound HTTPS and does not expose a public management listener.
 - Optional Worker control routes for dispatch, status, transcripts, private steering, command acknowledgements, and hangup.
 - Normal and business prompt modes. Business mode can read a local profile and a read-only calendar snapshot. It does not book appointments or send messages.
+- **Optional caller personas:** local AI name, style and accent preferences; separate named agents; disabled by default.
+- **Voicemail re-entry heuristic:** a distinct short receptionist reply after a recorded greeting can allow a human call to continue. This is audio-only and not a validated carrier-level voicemail detector.
+- **Encrypted personal calling profile:** local AES-GCM vault protected by a passphrase, with explicit per-field sharing for one manual outbound call only. No unattended vault access.
 - Default-deny outbound recipient allowlisting, per-day call limits, a one-call concurrency limit, and separate operator and gateway bearer secrets.
 - **Privacy-controlled transcripts:** choose `off` (default), `local`, `worker`, or `both`. Local SQLite keeps conversation text on your own machine; Worker/KV transcript export is explicitly opt-in. Remote call control continues to work without transcript upload.
 - Transcript normalization, duplicate suppression across event sources, and retries for failed Worker transcript uploads when enabled.
@@ -221,6 +240,27 @@ Copy-Item .env.example .env
 ```
 
 On macOS or Linux, use `cp .env.example .env`. Edit `.env` with your SIP termination URI, public IP, caller ID, SIP credentials, media port, and—if using remote control—the Worker URL and gateway token. Keep `PHONEDEX_ALLOWED_RECIPIENTS` empty until you are ready to authorize specific E.164 destinations. Set `PHONEDEX_MEDIA_PORT_FORWARDED=1` only after the SRTP UDP port is actually forwarded. Never commit `.env`.
+
+### Optional personal calling profile
+
+Store a chosen AI assistant name and voice style, or create a named agent persona:
+
+```sh
+python phonedex.py settings set assistant_name Muse
+python phonedex.py settings set enabled on
+python phonedex.py settings --agent muse set assistant_name Muse
+python phonedex.py settings --agent muse set enabled on
+```
+
+To store personal details in the encrypted local vault, use
+`python phonedex.py profile fields` and `python phonedex.py profile set full_name`.
+The CLI prompts privately for a passphrase and the field value. **Nothing from
+that vault is shared automatically.** An operator can explicitly choose fields
+for one manual outbound call via `--share-fields`, with confirmation and unlock.
+
+**Provider-verified personal caller IDs and press-1/press-* human handoff are
+not implemented** in this public version; they require carrier verification
+and tested multi-leg SIP support. See [caller profiles and limitations](docs/CALLING_PROFILE.md).
 
 ### Optional: remote agent control
 
@@ -322,7 +362,7 @@ From the repository root, install dependencies before running the offline tests:
 
 ```sh
 python phonedex.py doctor --mode local
-python -m unittest test_bootstrap test_agent_controller test_harness_live_adapter test_sip_teardown test_onboarding test_barge_in test_agentphone_transcripts test_voicemail test_transcript_privacy
+python -m unittest test_bootstrap test_agent_controller test_harness_live_adapter test_sip_teardown test_onboarding test_barge_in test_agentphone_transcripts test_voicemail test_transcript_privacy test_calling_profile
 # Optional: only if you plan to deploy remote Worker control:
 node worker/test-agent.mjs
 ```
@@ -385,6 +425,7 @@ The [roadmap and release review](docs/RELEASE_STATUS.md) records current verific
 ## Documentation
 
 - [Transcript privacy and local storage](docs/TRANSCRIPT_PRIVACY.md) — local SQLite, no-retention mode, remote transcript opt-in, data flow and deletion.
+- [Encrypted caller profiles and agent personas](docs/CALLING_PROFILE.md) — optional passphrase-protected fields with one-call manual disclosure only.
 - [Guided setup and readiness checks](docs/ONBOARDING.md) — interactive local configuration, remote control options, and remaining manual steps.
 - [AgentPhone credit savings](docs/AGENTPHONE_CREDIT_SAVINGS.md) — measured 90.9% outbound and 98.3% inbound AgentPhone charge reductions, with an anonymized transaction ledger.
 - [Technical notes](docs/TECHNICAL_NOTES.md) — media, control, authentication, and data boundaries.

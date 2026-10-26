@@ -26,6 +26,13 @@ TONE_END_FRAMES = 4               # 80ms after tone ends
 BEFORE_BEEP_VOICE_FRAMES = 30
 MACHINE_GREETING_MS = 2400
 HUMAN_SILENCE_MS = 1250
+# A receptionist may answer after a recorded greeting. Reevaluate only when
+# there is a distinctly separate, short reply followed by sustained silence.
+# Audio-only screening cannot reliably resolve overlapping voices.
+REENTRY_PAUSE_MS = 1000
+REENTRY_MIN_VOICE_MS = 160
+REENTRY_MAX_VOICE_MS = 2000
+REENTRY_QUIET_MS = 1800
 INITIAL_SILENCE_MS = 3200
 MAX_SCREEN_MS = 25000
 BEEP_FREQUENCIES = tuple(range(400, 1651, 50))
@@ -69,6 +76,8 @@ class VoicemailScreen:
         self.longest_segment=0
         self.gap=0
         self.machine=False
+        self.reentry_active=False
+        self.reentry_voice=0
         self.tone_run=0
         self.tone_gap=0
         self.tone_frequency=None
@@ -114,6 +123,20 @@ class VoicemailScreen:
             self.tone_frequency=None
 
         if tone is None and rms>=VOICE_RMS:
+            if self.machine and self.gap*FRAME_MS>=REENTRY_PAUSE_MS:
+                # Do not lock into "machine" forever: the greeting may have
+                # started playing before a receptionist picked up.
+                self.reentry_active=True
+                self.reentry_voice=0
+            elif self.reentry_active and self.gap*FRAME_MS>=300:
+                # More than one new phrase: ambiguous IVR rather than a
+                # single answered turn. Wait for a beep or time out safely.
+                self.reentry_active=False
+                self.reentry_voice=0
+            if self.reentry_active:
+                self.reentry_voice+=1
+                if self.reentry_voice*FRAME_MS>REENTRY_MAX_VOICE_MS:
+                    self.reentry_active=False
             self.spoken+=1
             self.segment_voice+=1
             self.gap=0
@@ -126,6 +149,13 @@ class VoicemailScreen:
                 self.machine=True
         elif tone is None:
             self.gap+=1
+            if (self.machine and self.reentry_active
+                    and REENTRY_MIN_VOICE_MS<=self.reentry_voice*FRAME_MS<=REENTRY_MAX_VOICE_MS
+                    and self.gap*FRAME_MS>=REENTRY_QUIET_MS):
+                # A live-looking short reply after the machine-like greeting
+                # receives a genuine turn to respond. Do not leave voicemail.
+                self.decide("human")
+                return self.decision
             if self.gap>=15:
                 self.segment_voice=0
 

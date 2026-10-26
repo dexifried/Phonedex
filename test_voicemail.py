@@ -74,6 +74,43 @@ class SignalTests(unittest.TestCase):
             screen.feed(ulaw_to_pcm16(pcm16_to_ulaw(SILENCE)))
         self.assertEqual(screen.decision,'voicemail_beep')
 
+    def test_receptionist_pickup_after_recorded_greeting(self):
+        screen=VoicemailScreen()
+        feed(screen,150,speech_frame)  # long recorded greeting
+        self.assertTrue(screen.machine)
+        feed(screen,55,lambda _:SILENCE)  # distinct pause
+        feed(screen,45,speech_frame)  # receptionist answers
+        self.assertIsNone(screen.decision)
+        feed(screen,95,lambda _:SILENCE)  # let the person respond
+        self.assertEqual(screen.decision,'human')
+        self.assertTrue(screen.event.is_set())
+
+    def test_paused_recorded_greeting_followed_by_beep_is_voicemail(self):
+        screen=VoicemailScreen()
+        feed(screen,150,speech_frame)
+        feed(screen,55,lambda _:SILENCE)
+        feed(screen,45,speech_frame)
+        feed(screen,12,lambda _:sample_tone(1000))
+        self.assertIsNone(screen.decision)
+        feed(screen,4,lambda _:SILENCE)
+        self.assertEqual(screen.decision,'voicemail_beep')
+
+    def test_long_second_phrase_not_released_as_human(self):
+        screen=VoicemailScreen()
+        feed(screen,150,speech_frame)
+        feed(screen,55,lambda _:SILENCE)
+        feed(screen,120,speech_frame)  # >2 seconds: not a short answer
+        feed(screen,95,lambda _:SILENCE)
+        self.assertIsNone(screen.decision)
+        feed(screen,900,lambda _:SILENCE)
+        self.assertEqual(screen.decision,'no_beep')
+
+    def test_no_human_pickup_during_recorded_greeting_stays_uncertain(self):
+        screen=VoicemailScreen()
+        feed(screen,150,speech_frame)
+        feed(screen,200,lambda _:SILENCE)
+        self.assertIsNone(screen.decision)
+
     def test_short_voicemail_beep_still_prevents_human_classification(self):
         screen=VoicemailScreen()
         feed(screen,55,speech_frame)
