@@ -18,7 +18,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import ValidationError
 
 from .analytics import analytics, csv_export
-from .auth import Auth, COOKIE
+from .auth import Auth, COOKIE, PAIRING_TTL_SECONDS
 from . import models
 from .providers import prepare_provider, public_provider, validate_config
 from .store import Store, TERMINAL
@@ -162,7 +162,7 @@ def create_app(data_dir, core_root, *, demo=False,lan_host=None,lan_subnet=None)
         if not request.client or not ipaddress.ip_address(request.client.host).is_loopback:
             raise HTTPException(403,'Pairing links can only be issued on this computer')
         auth.throttle('pairing')
-        return {'pairing_token':auth.create_pairing(),'expires_in':600}
+        return {'pairing_token':auth.create_pairing(),'expires_in':PAIRING_TTL_SECONDS}
 
     @app.get('/api/auth/session')
     def auth_session(request: Request):

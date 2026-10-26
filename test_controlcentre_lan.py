@@ -68,5 +68,20 @@ def test_expired_phone_pairing_fails_closed(tmp_path,monkeypatch):
     remote=TestClient(app,base_url='https://192.168.4.144:8808',client=('192.168.4.42',1234))
     token=app.state.auth.create_pairing()
     monkeypatch.setattr(module.time,'time',lambda:9999999999)
-    assert remote.post('/api/auth/setup',json={'password':'synthetic-lan-test-password','pairing_token':token}).status_code==403
+    response=remote.post('/api/auth/setup',json={'password':'synthetic-lan-test-password','pairing_token':token})
+    assert response.status_code==403
+    assert 'expired' in response.json()['detail'].lower()
     assert not app.state.auth.configured()
+
+
+def test_phone_pairing_allows_time_to_finish_setup_on_another_device(tmp_path,monkeypatch):
+    import controlcentre.auth as module
+    started=module.time.time()
+    app=create_app(tmp_path,tmp_path,lan_host='192.168.4.144',lan_subnet='192.168.4.0/22')
+    remote=TestClient(app,base_url='https://192.168.4.144:8808',client=('192.168.4.42',1234))
+    token=app.state.auth.create_pairing()
+    monkeypatch.setattr(module.time,'time',lambda:started+1800)
+    response=remote.post('/api/auth/setup',json={'password':'synthetic-lan-test-password','pairing_token':token})
+    assert response.status_code==200
+    assert remote.get('/api/workspace').status_code==200
+    assert app.state.store.get_meta('setup_pairing') is None

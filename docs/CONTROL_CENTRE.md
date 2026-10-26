@@ -243,7 +243,7 @@ on your phone or explicitly approve its warning for your own private address.
 First-time operator password setup works directly on a phone using a one-time
 pairing link. The computer issues a random capability through the loopback-only
 `POST /api/auth/pairing` endpoint while no operator password exists. Only its
-SHA-256 digest is stored, it expires after ten minutes, and password creation
+SHA-256 digest is stored, it expires after one hour, and password creation
 consumes it atomically. The UI accepts it from `#pair=...`, immediately clears
 the fragment and keeps it only in memory until the HTTPS setup submission.
 No password or pairing token is placed in logs or browser storage. Unpaired

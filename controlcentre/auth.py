@@ -9,6 +9,7 @@ import time
 from fastapi import HTTPException
 
 COOKIE = 'phonedex_session'
+PAIRING_TTL_SECONDS = 3600
 
 
 class Auth:
@@ -31,10 +32,10 @@ class Auth:
             attempts.append(now)
 
     def create_pairing(self):
-        """Explicit bootstrap capability; retain only its digest for ten minutes."""
+        """Explicit bootstrap capability; retain only its digest for one hour."""
         if self.configured():raise HTTPException(409,'Operator password already configured')
         token=secrets.token_urlsafe(32)
-        self.store.set_meta('setup_pairing',{'digest':hashlib.sha256(token.encode()).hexdigest(),'expires':time.time()+600})
+        self.store.set_meta('setup_pairing',{'digest':hashlib.sha256(token.encode()).hexdigest(),'expires':time.time()+PAIRING_TTL_SECONDS})
         return token
 
     def setup(self, password, *, pairing_token=None, remote=False):
@@ -47,8 +48,10 @@ class Auth:
                     row=db.execute("SELECT data FROM meta WHERE key='setup_pairing'").fetchone()
                     pairing=json.loads(row['data']) if row else {}
                     candidate=hashlib.sha256((pairing_token or '').encode()).hexdigest()
-                    if (pairing.get('expires',0)<=time.time() or not hmac.compare_digest(candidate,pairing.get('digest',''))):
+                    if not hmac.compare_digest(candidate,pairing.get('digest','')):
                         raise HTTPException(403,'A valid one-time phone pairing link is required')
+                    if pairing.get('expires',0)<=time.time():
+                        raise HTTPException(403,'This phone pairing link has expired. Open a fresh setup link from this computer.')
                 if len(password)<12:raise HTTPException(422,'Use a password of at least 12 characters')
                 salt=secrets.token_bytes(16)
                 digest=hashlib.scrypt(password.encode(),salt=salt,n=16384,r=8,p=1).hex()
