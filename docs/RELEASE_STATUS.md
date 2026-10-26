@@ -1,6 +1,6 @@
 # PhoneDex — Experimental Release Status
 
-**Snapshot:** October 25, 2026 — v0.1.0-preview.7
+**Snapshot:** October 25, 2026 — preview.7 baseline plus newer portable updates
 **Status:** Source-only experimental prerelease; not production ready.
 
 ## What's included
@@ -14,6 +14,22 @@ applicable terms before deployment.
 This is a **public portable reference**, not a dump of the private running
 Muse gateway. It does not include production credentials, private caller
 logs, or a fully verified carrier handoff.
+
+## Portable updates after preview.7
+
+- Optional per-agent phone personas and **passphrase-encrypted local calling
+  profiles**, with explicit per-field selection for one manual outbound call.
+  No unattended or remote Worker vault access.
+- Conservative outbound voicemail re-entry handling for a receptionist who
+  answers after a recorded greeting. Offline-tested; not verified on every
+  carrier or real voicemail system.
+- Concise, task-focused generic call prompts, with optional Windows-first
+  onboarding from the separate PhoneDex CLI 0.1.1.
+- Caller-profile regression tests included in the public CI workflow.
+
+**Still excluded:** unfinished Jev/Kev observers, unverified human transfer,
+private gateway configuration, credentials, live caller data, and the
+in-progress dashboard. The source remains an experimental preview.
 
 ## What's new in preview.7
 
