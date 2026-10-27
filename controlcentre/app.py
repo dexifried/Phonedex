@@ -247,6 +247,28 @@ def create_app(data_dir, core_root, *, demo=False,lan_host=None,lan_subnet=None)
                                       private_instruction=True, hold=False, mute=False, transfer=False,
                                       conference=False, scheduling=False, messaging=False)))
 
+    @app.get('/api/agentphone/calls')
+    def agentphone_calls(request: Request):
+        auth.require(request)
+        if demo:
+            raise HTTPException(409, 'Carrier history is unavailable in demo mode')
+        from .agentphone_history import HistoryUnavailable, list_calls
+        try:
+            return safe({'calls': list_calls(), 'source': 'AgentPhone provider API'})
+        except HistoryUnavailable as exc:
+            raise HTTPException(503, str(exc)) from None
+
+    @app.get('/api/agentphone/calls/{provider_call_id}/transcript')
+    def agentphone_transcript(request: Request, provider_call_id: str):
+        auth.require(request)
+        if demo:
+            raise HTTPException(409, 'Carrier history is unavailable in demo mode')
+        from .agentphone_history import HistoryUnavailable, call_transcript
+        try:
+            return safe({'transcript': call_transcript(provider_call_id),
+                         'notice': 'Model-generated estimates, not an audio recording.'})
+        except HistoryUnavailable as exc:
+            raise HTTPException(503, str(exc)) from None
     @app.get('/api/calls/{call_id}')
     def get_call(request: Request, call_id: str):
         auth.require(request)

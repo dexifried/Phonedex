@@ -31,6 +31,7 @@ import {
 } from "../ui";
 import { CallsTable } from "./Overview";
 import { groupTranscript } from "../transcript";
+import AgentPhoneHistory from "./AgentPhoneHistory";
 export type Guard = (action: () => Promise<void>, reason: string) => void;
 export function CallsPage({
   data,
@@ -107,6 +108,7 @@ export function CallsPage({
           </Button>
         }
       />
+      {!live && <AgentPhoneHistory contacts={data.contacts} />}
       <div className="filter-bar">
         <div className="search-input">
           <Search size={16} />
@@ -345,6 +347,7 @@ export function CallDetail({
       />
       <div className="detail-stats">
         {[
+          ["Started", date(call.started_at)],
           ["Duration", duration(call.duration_seconds)],
           ["Task outcome", call.outcome || "Not recorded"],
           ["Cost", money(call.cost)],

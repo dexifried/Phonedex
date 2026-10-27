@@ -48,6 +48,7 @@ export function CallsTable({
         <thead>
           <tr>
             <th>Contact</th>
+            <th>When</th>
             <th>Direction</th>
             <th>Agent</th>
             <th>Duration</th>
@@ -69,6 +70,7 @@ export function CallsTable({
                 <strong>{c.contact || "Unknown contact"}</strong>
                 <small>{c.number_masked}</small>
               </td>
+              <td className="mono">{date(c.started_at)}</td>
               <td>
                 <span className="direction">
                   <ArrowRight size={13} />
